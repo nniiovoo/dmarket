@@ -1,0 +1,45 @@
+{
+  "name": "dapp-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "db:reset": "prisma migrate reset",
+    "api:smoke": "tsx scripts/manualTestApi.ts",
+    "indexer": "tsx scripts/indexer.ts",
+    "indexer:once": "tsx scripts/indexer.ts --once",
+    "sync-abi": "cd .. && npm run sync-abi"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0",
+    "@rainbow-me/rainbowkit": "^2.2.11",
+    "@tanstack/react-query": "^5.100.9",
+    "next": "^16.2.6",
+    "prisma": "^6.19.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "resend": "^6.12.3",
+    "viem": "^2.48.11",
+    "wagmi": "^2.16.9",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.3",
+    "@tailwindcss/postcss": "^4.1.18",
+    "@types/node": "^25.6.2",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.1",
+    "eslint-config-next": "^16.2.6",
+    "tailwindcss": "^4.1.18",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}

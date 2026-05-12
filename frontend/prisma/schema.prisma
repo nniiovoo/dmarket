@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id            Int      @id @default(autoincrement())
+  sellerAddress String
+  name          String
+  description   String   @default("")
+  priceWei      String
+  chainId       Int
+  imageUrl      String   @default("")
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([sellerAddress])
+  @@index([chainId, status])
+}
+
+model OnChainOrder {
+  id              Int       @id @default(autoincrement())
+  chainId         Int
+  onChainOrderId  String
+  buyer           String
+  seller          String
+  productId       String
+  amountWei       String
+  status          String
+  createdAt       DateTime?
+  paidAt          DateTime?
+  shippedAt       DateTime?
+  completedAt     DateTime?
+  refundedAt      DateTime?
+  disputedAt      DateTime?
+  lastBlock       BigInt
+  lastLogIndex    Int       @default(0)
+  lastTxHash      String
+  lastSyncedAt    DateTime  @default(now())
+  carrier         String?
+  trackingNumber  String?
+  trackingUrl     String?
+  shippingNote    String?
+  shippingUpdatedAt DateTime?
+
+  @@unique([chainId, onChainOrderId])
+  @@index([buyer])
+  @@index([seller])
+  @@index([status])
+  @@index([chainId])
+}
+
+model IndexerState {
+  chainId   Int      @id
+  lastBlock BigInt
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  walletAddress String   @id
+  email         String?
+  emailVerified Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([email])
+}
+
+model EmailLog {
+  id             Int      @id @default(autoincrement())
+  toAddress      String
+  toEmail        String
+  kind           String
+  chainId        Int
+  onChainOrderId String
+  status         String
+  error          String?
+  createdAt      DateTime @default(now())
+
+  @@index([toAddress, kind, onChainOrderId])
+  @@index([createdAt])
+}

@@ -1,0 +1,14 @@
+node_modules/
+.next/
+frontend/.next/
+frontend/out/
+artifacts/
+cache/
+types/
+coverage/
+.env
+frontend/.env
+frontend/.env.local
+
+frontend/prisma/dev.db
+frontend/prisma/dev.db-journal
