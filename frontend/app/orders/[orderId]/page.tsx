@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAccount, useChainId, useReadContract } from "wagmi";
 
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
+import { EvidenceSection } from "@/components/evidence/EvidenceSection";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { LockedActions } from "@/components/order/LockedActions";
 import { OrderActions as RoleOrderActions } from "@/components/order/OrderActions";
@@ -172,6 +173,7 @@ export default function OrderDetailPage() {
             {orderQuery.isFetching || vaultQuery.isFetching ? <p className="mt-3 text-xs text-slate-500">Refreshing...</p> : null}
           </Card>
           <ShippingSection order={orderApi.data} status={order.status} isLoading={orderApi.isLoading} isSyncing={orderApi.isError} />
+          {orderApi.data ? <EvidenceSection order={orderApi.data} /> : null}
           {showShipDialog ? (
             <ShipWithTrackingDialog
               order={toApiOrder(orderApi.data, order, chainId)}
@@ -218,6 +220,8 @@ function ShippingSection({
         </>
       ) : (
         <TrackingLink
+          chainId={order?.chainId ?? 0}
+          onChainOrderId={order?.onChainOrderId ?? ""}
           carrier={order?.carrier ?? null}
           trackingNumber={order?.trackingNumber ?? null}
           trackingUrl={order?.trackingUrl ?? null}

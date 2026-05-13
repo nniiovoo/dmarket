@@ -86,6 +86,24 @@ export function getIndexerMarketplaceAddress(chainId: number) {
   throw new Error(`Unsupported indexer chain: ${chainId}`);
 }
 
+export function getIndexerEvidenceRegistryAddress(chainId: number): Address | undefined {
+  if (chainId === sepolia.id) {
+    return (
+      (process.env.NEXT_PUBLIC_V3_SEPOLIA_EVIDENCE_REGISTRY_ADDRESS as Address | undefined) ??
+      (process.env.V3_SEPOLIA_EVIDENCE_REGISTRY_ADDRESS as Address | undefined)
+    );
+  }
+
+  if (chainId === polygonAmoy.id) {
+    return (
+      (process.env.NEXT_PUBLIC_V3_AMOY_EVIDENCE_REGISTRY_ADDRESS as Address | undefined) ??
+      (process.env.V3_AMOY_EVIDENCE_REGISTRY_ADDRESS as Address | undefined)
+    );
+  }
+
+  return undefined;
+}
+
 export function createIndexerClient(chainId: number) {
   const chain = getIndexerChain(chainId);
   const rpcUrl = getRpcUrl(chainId);

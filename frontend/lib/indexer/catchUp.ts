@@ -1,15 +1,18 @@
-import type { Log } from "viem";
+import type { Address, Log } from "viem";
 
 import { prisma } from "../db";
 import { applyEvent } from "./applyEvent";
+import { applyEvidenceEvent } from "./applyEvidenceEvent";
 import {
   createIndexerClient,
   DEPLOYMENT_BLOCK,
+  getIndexerEvidenceRegistryAddress,
   getIndexerMarketplaceAddress,
   INDEXER_CHUNK_SIZE_BLOCKS,
   INDEXER_REQUEST_DELAY_MS
 } from "./config";
 import { compareLogs, decodeLogs, type IndexedLog } from "./eventDecoder";
+import { decodeEvidenceLogs } from "./evidenceEventDecoder";
 
 type IndexerClient = ReturnType<typeof createIndexerClient>;
 type RawIndexerLog = Log & {
@@ -52,10 +55,23 @@ export async function processLogs(chainId: number, logs: IndexedLog[], client = 
 
   const sortedLogs = [...logs].sort(compareLogs);
   const timestampByBlock = await fetchBlockTimestamps(client, sortedLogs);
-  const events = decodeLogs(sortedLogs, timestampByBlock);
 
-  for (const event of events) {
+  const marketplaceAddr = getIndexerMarketplaceAddress(chainId).toLowerCase();
+  const registryAddr = getIndexerEvidenceRegistryAddress(chainId)?.toLowerCase();
+
+  const marketplaceLogs = sortedLogs.filter((log) => log.address.toLowerCase() === marketplaceAddr);
+  const registryLogs = registryAddr
+    ? sortedLogs.filter((log) => log.address.toLowerCase() === registryAddr)
+    : [];
+
+  const marketplaceEvents = decodeLogs(marketplaceLogs, timestampByBlock);
+  const evidenceEvents = decodeEvidenceLogs(registryLogs, timestampByBlock);
+
+  for (const event of marketplaceEvents) {
     await applyEvent(prisma, chainId, event);
+  }
+  for (const event of evidenceEvents) {
+    await applyEvidenceEvent(prisma, chainId, event);
   }
 }
 
@@ -93,8 +109,14 @@ export function normalizeLogs(logs: readonly RawIndexerLog[]): IndexedLog[] {
 async function getLogsAdaptive(chainId: number, client: IndexerClient, fromBlock: bigint, toBlock: bigint): Promise<IndexedLog[]> {
   try {
     await throttleRpc();
+    const addresses: Address[] = [getIndexerMarketplaceAddress(chainId)];
+    const registryAddr = getIndexerEvidenceRegistryAddress(chainId);
+    if (registryAddr !== undefined) {
+      addresses.push(registryAddr);
+    }
+
     const rawLogs = await client.getLogs({
-      address: getIndexerMarketplaceAddress(chainId),
+      address: addresses,
       fromBlock,
       toBlock
     });

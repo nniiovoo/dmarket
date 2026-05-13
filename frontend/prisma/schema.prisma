@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -24,28 +24,28 @@ model Product {
 }
 
 model OnChainOrder {
-  id              Int       @id @default(autoincrement())
-  chainId         Int
-  onChainOrderId  String
-  buyer           String
-  seller          String
-  productId       String
-  amountWei       String
-  status          String
-  createdAt       DateTime?
-  paidAt          DateTime?
-  shippedAt       DateTime?
-  completedAt     DateTime?
-  refundedAt      DateTime?
-  disputedAt      DateTime?
-  lastBlock       BigInt
-  lastLogIndex    Int       @default(0)
-  lastTxHash      String
-  lastSyncedAt    DateTime  @default(now())
-  carrier         String?
-  trackingNumber  String?
-  trackingUrl     String?
-  shippingNote    String?
+  id                Int       @id @default(autoincrement())
+  chainId           Int
+  onChainOrderId    String
+  buyer             String
+  seller            String
+  productId         String
+  amountWei         String
+  status            String
+  createdAt         DateTime?
+  paidAt            DateTime?
+  shippedAt         DateTime?
+  completedAt       DateTime?
+  refundedAt        DateTime?
+  disputedAt        DateTime?
+  lastBlock         BigInt
+  lastLogIndex      Int       @default(0)
+  lastTxHash        String
+  lastSyncedAt      DateTime  @default(now())
+  carrier           String?
+  trackingNumber    String?
+  trackingUrl       String?
+  shippingNote      String?
   shippingUpdatedAt DateTime?
 
   @@unique([chainId, onChainOrderId])
@@ -84,4 +84,55 @@ model EmailLog {
 
   @@index([toAddress, kind, onChainOrderId])
   @@index([createdAt])
+}
+
+model TrackingSnapshot {
+  id             Int       @id @default(autoincrement())
+  chainId        Int
+  onChainOrderId String
+  trackingNumber String
+  // Normalised status: "Delivered" / "InTransit" / "Pickup" / "Undelivered" /
+  // "Expired" / "Exception" / "Unknown".
+  status         String
+  // 17track raw status_code (0/10/20/30/35/40/50).
+  statusCode     Int
+  latestEventAt  DateTime?
+  // JSON: [{ time: ISO string, description: string, location: string|null, statusCode: number }]
+  events         Json
+  lastFetchedAt  DateTime  @default(now())
+
+  @@unique([chainId, onChainOrderId])
+  @@index([lastFetchedAt])
+}
+
+// Per-evidence record. One row per ERC-1497 Evidence event emitted by
+// EvidenceRegistryV3. Includes optional oracle query result when the
+// submission used submitEvidenceWithOracleQuery and the DON callback has
+// arrived.
+model Evidence {
+  id                             Int      @id @default(autoincrement())
+  chainId                        Int
+  onChainOrderId                 String
+  evidenceIndex                  Int
+  party                          String
+  evidenceURI                    String
+  contentHash                    String
+  marketplaceDeliveredAtSnapshot BigInt
+  submittedAt                    DateTime
+  submittedBlock                 BigInt
+  submittedTxHash                String
+
+  oracleRequestId          String?
+  oracleQueryStatus        String?
+  oracleDelivered          Boolean?
+  oracleDeliveredTimestamp BigInt?
+  oracleError              String?
+  oracleFulfilledAt        DateTime?
+  oracleFulfilledBlock     BigInt?
+  oracleFulfilledTxHash    String?
+
+  @@unique([chainId, onChainOrderId, evidenceIndex])
+  @@index([chainId, onChainOrderId])
+  @@index([party])
+  @@index([oracleQueryStatus])
 }
