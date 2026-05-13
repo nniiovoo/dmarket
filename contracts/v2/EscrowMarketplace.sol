@@ -2,6 +2,8 @@
 pragma solidity ^0.8.24;
 
 import {EscrowVault} from "./EscrowVault.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 // EscrowMarketplace v2: a single contract that owns all order lifecycle logic.
 //
@@ -16,7 +18,7 @@ import {EscrowVault} from "./EscrowVault.sol";
 // Wiring requirement: after deployment, the vault owner must call
 // vault.setMarketplace(<this contract's address>). Without that step, payOrder will
 // revert because the vault refuses unauthorised callers.
-contract EscrowMarketplaceV2 {
+contract EscrowMarketplaceV2 is Pausable, ReentrancyGuard {
     enum OrderStatus {
         Created, // 已创建，未付款
         Paid, // 已付款，资金锁在 vault
@@ -90,19 +92,30 @@ contract EscrowMarketplaceV2 {
         vault = EscrowVault(payable(vaultAddress));
     }
 
+    // Owner-only emergency brake. When paused, new payments / shipments / receipts / disputes
+    // are rejected. Existing escrowed orders can still be cancelled (if unpaid), refunded by
+    // admin, or have their disputes resolved — these escape hatches must remain available.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
     // The marketplace itself never holds ETH. Funds always flow through the vault.
     receive() external payable {
         revert("Direct ETH transfers are not allowed");
     }
 
     // Buyer creates an unpaid order.
-    function createOrder(address seller, uint256 productId, uint256 amount) external returns (uint256) {
+    function createOrder(address seller, uint256 productId, uint256 amount) external whenNotPaused returns (uint256) {
         return _createOrderInternal(seller, productId, amount);
     }
 
     // One-click buy: create the order and escrow funds in one transaction.
     // msg.value becomes the order amount.
-    function createAndPay(address seller, uint256 productId) external payable returns (uint256) {
+    function createAndPay(address seller, uint256 productId) external payable nonReentrant whenNotPaused returns (uint256) {
         require(msg.value > 0, "Amount must be greater than zero");
 
         uint256 orderId = _createOrderInternal(seller, productId, msg.value);
@@ -141,7 +154,7 @@ contract EscrowMarketplaceV2 {
     }
 
     // Buyer pays for an order. The marketplace forwards the exact ETH to the vault.
-    function payOrder(uint256 orderId) external payable orderExists(orderId) {
+    function payOrder(uint256 orderId) external payable nonReentrant whenNotPaused orderExists(orderId) {
         _payOrderInternal(orderId);
     }
 
@@ -162,7 +175,7 @@ contract EscrowMarketplaceV2 {
     }
 
     // Seller marks a paid order as shipped.
-    function markShipped(uint256 orderId) external orderExists(orderId) {
+    function markShipped(uint256 orderId) external whenNotPaused orderExists(orderId) {
         Order storage order = orders[orderId];
 
         require(msg.sender == order.seller, "Only seller can mark shipped");
@@ -175,7 +188,7 @@ contract EscrowMarketplaceV2 {
     }
 
     // Buyer confirms receipt — the vault releases ETH to the seller.
-    function confirmReceived(uint256 orderId) external orderExists(orderId) {
+    function confirmReceived(uint256 orderId) external nonReentrant whenNotPaused orderExists(orderId) {
         Order storage order = orders[orderId];
 
         require(msg.sender == order.buyer, "Only buyer can confirm receipt");
@@ -206,7 +219,7 @@ contract EscrowMarketplaceV2 {
     }
 
     // Buyer or seller opens a dispute while funds are escrowed.
-    function openDispute(uint256 orderId) external orderExists(orderId) {
+    function openDispute(uint256 orderId) external whenNotPaused orderExists(orderId) {
         Order storage order = orders[orderId];
 
         require(msg.sender == order.buyer || msg.sender == order.seller, "Only buyer or seller can open dispute");
@@ -221,7 +234,7 @@ contract EscrowMarketplaceV2 {
     }
 
     // Owner resolves a dispute by either refunding the buyer or paying the seller.
-    function resolveDispute(uint256 orderId, bool refundBuyer) external onlyOwner orderExists(orderId) {
+    function resolveDispute(uint256 orderId, bool refundBuyer) external nonReentrant onlyOwner orderExists(orderId) {
         Order storage order = orders[orderId];
 
         require(order.status == OrderStatus.Disputed, "Order must be Disputed");
@@ -252,7 +265,7 @@ contract EscrowMarketplaceV2 {
 
     // Owner-only escape hatch: refund a buyer directly without requiring a dispute.
     // Valid in any state where the vault still holds the order's funds.
-    function ownerEmergencyRefund(uint256 orderId) external onlyOwner orderExists(orderId) {
+    function ownerEmergencyRefund(uint256 orderId) external nonReentrant onlyOwner orderExists(orderId) {
         Order storage order = orders[orderId];
 
         require(

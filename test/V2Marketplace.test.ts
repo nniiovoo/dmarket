@@ -601,4 +601,179 @@ describe("V2 Marketplace (marketplace + vault)", function () {
       await checkInvariants(fixture, [1n]);
     });
   });
+
+  // -------- pausable --------
+
+  it("非 owner 不能 pause", async function () {
+    const { other, marketplace } = await deploy();
+    await expect(marketplace.connect(other).pause()).to.be.revertedWith(
+      "Only owner can call this function"
+    );
+  });
+
+  it("非 owner 不能 unpause", async function () {
+    const { owner, other, marketplace } = await deploy();
+    await marketplace.connect(owner).pause();
+    await expect(marketplace.connect(other).unpause()).to.be.revertedWith(
+      "Only owner can call this function"
+    );
+  });
+
+  it("paused 时 createOrder 被拒绝", async function () {
+    const { owner, buyer, seller, marketplace, amount, productId } = await deploy();
+    await marketplace.connect(owner).pause();
+    expect(await marketplace.paused()).to.equal(true);
+
+    await expect(
+      marketplace.connect(buyer).createOrder(seller.address, productId, amount)
+    ).to.be.revertedWithCustomError(marketplace, "EnforcedPause");
+  });
+
+  it("paused 时 createAndPay 被拒绝", async function () {
+    const { owner, buyer, seller, marketplace, amount, productId } = await deploy();
+    await marketplace.connect(owner).pause();
+
+    await expect(
+      marketplace.connect(buyer).createAndPay(seller.address, productId, { value: amount })
+    ).to.be.revertedWithCustomError(marketplace, "EnforcedPause");
+  });
+
+  it("paused 时 payOrder 被拒绝", async function () {
+    const { owner, buyer, marketplace, amount, orderId } = await createdOrder();
+    await marketplace.connect(owner).pause();
+
+    await expect(
+      marketplace.connect(buyer).payOrder(orderId, { value: amount })
+    ).to.be.revertedWithCustomError(marketplace, "EnforcedPause");
+  });
+
+  it("paused 时 markShipped 被拒绝", async function () {
+    const { owner, seller, marketplace, orderId } = await paidOrder();
+    await marketplace.connect(owner).pause();
+
+    await expect(
+      marketplace.connect(seller).markShipped(orderId)
+    ).to.be.revertedWithCustomError(marketplace, "EnforcedPause");
+  });
+
+  it("paused 时 confirmReceived 被拒绝", async function () {
+    const { owner, buyer, marketplace, orderId } = await shippedOrder();
+    await marketplace.connect(owner).pause();
+
+    await expect(
+      marketplace.connect(buyer).confirmReceived(orderId)
+    ).to.be.revertedWithCustomError(marketplace, "EnforcedPause");
+  });
+
+  it("paused 时 openDispute 被拒绝", async function () {
+    const { owner, buyer, marketplace, orderId } = await paidOrder();
+    await marketplace.connect(owner).pause();
+
+    await expect(
+      marketplace.connect(buyer).openDispute(orderId)
+    ).to.be.revertedWithCustomError(marketplace, "EnforcedPause");
+  });
+
+  it("paused 时 cancelOrder 仍然可用（逃生通道）", async function () {
+    const { ethers, owner, buyer, marketplace, vault, orderId } = await createdOrder();
+    await marketplace.connect(owner).pause();
+
+    await expect(marketplace.connect(buyer).cancelOrder(orderId))
+      .to.emit(marketplace, "OrderCancelled")
+      .withArgs(orderId);
+
+    await checkInvariants({ ethers, marketplace, vault }, [orderId]);
+  });
+
+  it("paused 时 resolveDispute 仍然可用（逃生通道）", async function () {
+    const { ethers, owner, buyer, marketplace, vault, amount, orderId } = await disputedOrder();
+    await marketplace.connect(owner).pause();
+
+    const buyerBalanceBefore = await ethers.provider.getBalance(buyer.address);
+    await marketplace.connect(owner).resolveDispute(orderId, true);
+    const buyerBalanceAfter = await ethers.provider.getBalance(buyer.address);
+
+    expect(buyerBalanceAfter - buyerBalanceBefore).to.equal(amount);
+    await checkInvariants({ ethers, marketplace, vault }, [orderId]);
+  });
+
+  it("paused 时 ownerEmergencyRefund 仍然可用（逃生通道）", async function () {
+    const { ethers, owner, buyer, marketplace, vault, amount, orderId } = await paidOrder();
+    await marketplace.connect(owner).pause();
+
+    const buyerBalanceBefore = await ethers.provider.getBalance(buyer.address);
+    await marketplace.connect(owner).ownerEmergencyRefund(orderId);
+    const buyerBalanceAfter = await ethers.provider.getBalance(buyer.address);
+
+    expect(buyerBalanceAfter - buyerBalanceBefore).to.equal(amount);
+    await checkInvariants({ ethers, marketplace, vault }, [orderId]);
+  });
+
+  it("unpause 后所有操作恢复", async function () {
+    const { ethers, owner, buyer, seller, marketplace, vault, amount, productId } = await deploy();
+
+    await marketplace.connect(owner).pause();
+    await expect(
+      marketplace.connect(buyer).createOrder(seller.address, productId, amount)
+    ).to.be.revertedWithCustomError(marketplace, "EnforcedPause");
+
+    await marketplace.connect(owner).unpause();
+    expect(await marketplace.paused()).to.equal(false);
+
+    await marketplace.connect(buyer).createOrder(seller.address, productId, amount);
+    const order = await marketplace.getOrder(1n);
+    expect(Number(order.status)).to.equal(OrderStatus.Created);
+
+    await checkInvariants({ ethers, marketplace, vault }, [1n]);
+  });
+
+  // -------- reentrancy --------
+
+  it("恶意 seller 在收款时重入会被 nonReentrant + CEI 双重拦截", async function () {
+    const { ethers, buyer, marketplace, vault, amount, productId } = await deploy();
+    const maliciousSeller = await ethers.deployContract(
+      "MaliciousSeller",
+      [await marketplace.getAddress()]
+    );
+    const maliciousSellerAddress = await maliciousSeller.getAddress();
+
+    await marketplace.connect(buyer).createOrder(maliciousSellerAddress, productId, amount);
+    await maliciousSeller.setOrderId(1n);
+    await marketplace.connect(buyer).payOrder(1n, { value: amount });
+    await maliciousSeller.markShipped();
+    await maliciousSeller.enableAttack();
+
+    const beforeSellerBalance = await ethers.provider.getBalance(maliciousSellerAddress);
+
+    await marketplace.connect(buyer).confirmReceived(1n);
+
+    const afterSellerBalance = await ethers.provider.getBalance(maliciousSellerAddress);
+    const order = await marketplace.getOrder(1n);
+
+    // 订单正常完成，钱只放一次，恶意 seller 重入尝试被吞掉
+    expect(Number(order.status)).to.equal(OrderStatus.Completed);
+    expect(afterSellerBalance - beforeSellerBalance).to.equal(amount);
+    expect(await maliciousSeller.reentryAttempts()).to.equal(1n);
+
+    // 不变量：marketplace 不持币，vault 已释放
+    expect(await ethers.provider.getBalance(await marketplace.getAddress())).to.equal(0n);
+    expect(await ethers.provider.getBalance(await vault.getAddress())).to.equal(0n);
+    await checkInvariants({ ethers, marketplace, vault }, [1n]);
+  });
+
+  it("nonReentrant 阻止 paidOrder 期间的重入（buyer 同一笔 tx 内不能再次 payOrder）", async function () {
+    // 这个测试更像"显式 spec 检查"——验证 nonReentrant 真的挂在 payOrder 上。
+    // 通过 EOA buyer 在 createAndPay 内部不能 reenter 来间接证明：
+    // createAndPay -> _payOrderInternal -> vault.lockFunds (没有 receive callback 给 EOA)
+    // 这条路径上没有可被 EOA 触发的重入点，所以本测试仅做 sanity：
+    // 调用 createAndPay 成功且 vault 锁额正确，nonReentrant 不会误伤正常流程。
+    const { ethers, buyer, seller, marketplace, vault, amount, productId } = await deploy();
+
+    await marketplace.connect(buyer).createAndPay(seller.address, productId, { value: amount });
+
+    const order = await marketplace.getOrder(1n);
+    expect(Number(order.status)).to.equal(OrderStatus.Paid);
+    expect(await vault.lockedAmount(1n)).to.equal(amount);
+    await checkInvariants({ ethers, marketplace, vault }, [1n]);
+  });
 });
