@@ -193,7 +193,7 @@ contract EscrowMarketplaceV3 is Ownable2Step, Pausable, ReentrancyGuard, Functio
 
         emit OrderPaid(orderId, msg.sender, msg.value);
 
-        vault.lockFunds{value: msg.value}(orderId);
+        vault.lockFunds{value: msg.value}(orderId, order.buyer, order.seller);
     }
 
     function markShipped(uint256 orderId) external whenNotPaused orderExists(orderId) {
@@ -263,7 +263,7 @@ contract EscrowMarketplaceV3 is Ownable2Step, Pausable, ReentrancyGuard, Functio
 
             emit OrderRefunded(orderId, buyer, amount);
 
-            vault.releaseTo(orderId, buyer);
+            vault.releaseToBuyer(orderId);
         } else {
             _completeOrder(orderId, order);
         }
@@ -293,7 +293,7 @@ contract EscrowMarketplaceV3 is Ownable2Step, Pausable, ReentrancyGuard, Functio
 
         emit OrderEmergencyRefunded(orderId, buyer, amount);
 
-        vault.releaseTo(orderId, buyer);
+        vault.releaseToBuyer(orderId);
     }
 
     function requestDelivery(uint256 orderId) external whenNotPaused orderExists(orderId) returns (bytes32) {
@@ -418,7 +418,7 @@ contract EscrowMarketplaceV3 is Ownable2Step, Pausable, ReentrancyGuard, Functio
 
         emit OrderCompleted(orderId, seller, amount);
 
-        vault.releaseTo(orderId, seller);
+        vault.releaseToSeller(orderId);
     }
 
     function fulfillRequest(bytes32 requestId, bytes memory response, bytes memory err) internal override {

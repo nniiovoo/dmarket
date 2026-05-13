@@ -1158,6 +1158,72 @@ describe("V3 Marketplace (delivery oracle)", function () {
     });
   });
 
+  describe("vault self-recorded parties (H5)", function () {
+    it("lockFunds 写入 partiesByOrder", async function () {
+      const { buyer, seller, marketplace, vault, amount, productId } = await deploy();
+      await marketplace.connect(buyer).createAndPay(seller.address, productId, { value: amount });
+      const orderId = 1n;
+
+      const parties = await vault.partiesByOrder(orderId);
+      expect(parties.buyer).to.equal(buyer.address);
+      expect(parties.seller).to.equal(seller.address);
+    });
+
+    it("releaseToBuyer 用 vault 自己存的 buyer，不接受任意地址", async function () {
+      const { ethers, owner, buyer, seller, marketplace, vault, amount, productId } = await deploy();
+      await marketplace.connect(buyer).createAndPay(seller.address, productId, { value: amount });
+      const orderId = 1n;
+      await marketplace.connect(seller).markShipped(orderId);
+      await marketplace.connect(buyer).openDispute(orderId);
+      await ethers.provider.send("evm_increaseTime", [3 * 24 * 60 * 60 + 1]);
+      await ethers.provider.send("evm_mine", []);
+
+      await marketplace.connect(owner).resolveDispute(orderId, true);
+
+      expect(await vault.pendingWithdrawal(buyer.address)).to.equal(amount);
+      expect(await vault.pendingWithdrawal(seller.address)).to.equal(0n);
+    });
+
+    it("releaseToSeller 用 vault 自己存的 seller", async function () {
+      const { buyer, seller, marketplace, vault, amount, productId } = await deploy();
+      await marketplace.connect(buyer).createAndPay(seller.address, productId, { value: amount });
+      const orderId = 1n;
+      await marketplace.connect(seller).markShipped(orderId);
+      await marketplace.connect(buyer).confirmReceived(orderId);
+
+      expect(await vault.pendingWithdrawal(seller.address)).to.equal(amount);
+      expect(await vault.pendingWithdrawal(buyer.address)).to.equal(0n);
+    });
+
+    it("releaseToBuyer / releaseToSeller 只能 marketplace 调", async function () {
+      const { other, buyer, seller, marketplace, vault, amount, productId } = await deploy();
+      await marketplace.connect(buyer).createAndPay(seller.address, productId, { value: amount });
+      const orderId = 1n;
+
+      await expect(vault.connect(other).releaseToBuyer(orderId)).to.be.revertedWith(
+        "Only marketplace can call this function"
+      );
+      await expect(vault.connect(other).releaseToSeller(orderId)).to.be.revertedWith(
+        "Only marketplace can call this function"
+      );
+    });
+
+    it("lockFunds 拒绝 buyer == seller", async function () {
+      // Stand up a bare vault with a signer EOA as the marketplace so we can
+      // call lockFunds directly with crafted parties; the real marketplace
+      // already rejects "seller == msg.sender" upstream, this is the
+      // defense-in-depth check that the vault itself also refuses.
+      const { ethers, owner, marketplace: fakeMarketplace, other: alice, vault } = await deployVaultOnly();
+      await vault.connect(owner).setMarketplace(fakeMarketplace.address);
+
+      await expect(
+        vault.connect(fakeMarketplace).lockFunds(1n, alice.address, alice.address, {
+          value: ethers.parseEther("1")
+        })
+      ).to.be.revertedWith("Buyer and seller must differ");
+    });
+  });
+
   describe("reentrancy", function () {
     it("malicious seller cannot double-release via reentry in confirmReceived", async function () {
       const { ethers, buyer, marketplace, vault, amount, productId } = await deploy();

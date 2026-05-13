@@ -7,14 +7,24 @@ contract EscrowVaultV3 is ReentrancyGuard {
     address public immutable owner;
     address public marketplace;
 
+    // H5 defense-in-depth: the vault records buyer + seller at lock time and
+    // refuses to send funds to any other address. Even if the marketplace is
+    // ever compromised or has a logic bug, it cannot point release at an
+    // attacker-controlled address.
+    struct OrderParties {
+        address buyer;
+        address seller;
+    }
+
     mapping(uint256 => uint256) public lockedAmount;
+    mapping(uint256 => OrderParties) public partiesByOrder;
     mapping(address => uint256) public pendingWithdrawal;
 
     event MarketplaceUpdated(address indexed oldMarketplace, address indexed newMarketplace);
     event FundsLocked(uint256 indexed orderId, uint256 amount);
-    // releaseTo no longer transfers ETH; it credits the recipient's pending
-    // balance. FundsReleased keeps the (orderId, to, amount) shape so the
-    // indexer doesn't need to change.
+    // FundsReleased keeps the (orderId, to, amount) shape so the indexer
+    // doesn't need to change. Funds are credited to pendingWithdrawal rather
+    // than transferred directly, matching the pull-payment pattern.
     event FundsReleased(uint256 indexed orderId, address indexed to, uint256 amount);
     event Withdrawn(address indexed account, address indexed to, uint256 amount);
 
@@ -47,23 +57,38 @@ contract EscrowVaultV3 is ReentrancyGuard {
         emit MarketplaceUpdated(oldMarketplace, newMarketplace);
     }
 
-    function lockFunds(uint256 orderId) external payable onlyMarketplace {
+    function lockFunds(uint256 orderId, address buyer, address seller) external payable onlyMarketplace {
         require(msg.value > 0, "Must lock non-zero amount");
         require(lockedAmount[orderId] == 0, "Funds already locked for this order");
+        require(buyer != address(0), "Buyer cannot be zero address");
+        require(seller != address(0), "Seller cannot be zero address");
+        require(buyer != seller, "Buyer and seller must differ");
 
         lockedAmount[orderId] = msg.value;
+        partiesByOrder[orderId] = OrderParties({ buyer: buyer, seller: seller });
 
         emit FundsLocked(orderId, msg.value);
     }
 
-    // No longer transfers; credits pending balance instead. This makes
-    // marketplace state transitions immune to malicious recipients whose
-    // receive() reverts.
-    function releaseTo(uint256 orderId, address to) external onlyMarketplace {
+    // The vault decides who receives funds, not the caller. Callers pick
+    // direction (buyer vs seller); the actual address comes from what the
+    // vault recorded at lockFunds time.
+    function releaseToBuyer(uint256 orderId) external onlyMarketplace {
+        _release(orderId, partiesByOrder[orderId].buyer);
+    }
+
+    function releaseToSeller(uint256 orderId) external onlyMarketplace {
+        _release(orderId, partiesByOrder[orderId].seller);
+    }
+
+    function _release(uint256 orderId, address to) private {
         uint256 amount = lockedAmount[orderId];
 
         require(amount > 0, "No locked funds for this order");
-        require(to != address(0), "Cannot release to zero address");
+        // Defensive: lockFunds enforces both party fields non-zero, but a
+        // future bug could leave the slot empty — refuse to release in that
+        // case rather than burning funds to address(0).
+        require(to != address(0), "Recipient not recorded");
 
         lockedAmount[orderId] = 0;
         pendingWithdrawal[to] += amount;
