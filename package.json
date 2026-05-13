@@ -10,6 +10,7 @@
   },
   "devDependencies": {
     "@chainlink/contracts": "^1.5.0",
+    "@chainlink/functions-toolkit": "^0.3.2",
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.5",
     "@openzeppelin/contracts": "^5.0.2",
     "@types/mocha": "^10.0.10",
@@ -18,5 +19,8 @@
     "hardhat": "^3.4.5",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1"
   }
 }
