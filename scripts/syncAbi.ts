@@ -17,6 +17,10 @@ const abiTargets = [
   {
     artifact: "artifacts/contracts/v3/EscrowVaultV3.sol/EscrowVaultV3.json",
     output: "frontend/abi/EscrowVaultV3.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3/EvidenceRegistryV3.sol/EvidenceRegistryV3.json",
+    output: "frontend/abi/EvidenceRegistryV3.json"
   }
 ];
 

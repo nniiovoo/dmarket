@@ -2,12 +2,19 @@
 pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/FunctionsClient.sol";
 import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
 import {EscrowVaultV3} from "./EscrowVaultV3.sol";
 
-contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
+interface IEvidenceRegistryV3 {
+    function marketplace() external view returns (address);
+}
+
+contract EscrowMarketplaceV3 is Ownable2Step, Pausable, ReentrancyGuard, FunctionsClient {
     using FunctionsRequest for FunctionsRequest.Request;
 
     enum OrderStatus {
@@ -32,6 +39,7 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
         uint64 shippedAt;
         uint64 completedAt;
         uint64 deliveredAt;
+        uint64 disputedAt;
     }
 
     uint256 public nextOrderId;
@@ -47,6 +55,19 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
     mapping(address => uint256[]) private buyerOrders;
     mapping(address => uint256[]) private sellerOrders;
     mapping(bytes32 => uint256) public deliveryRequestToOrderId;
+    uint64 public constant DELIVERY_REQUEST_COOLDOWN = 1 hours;
+    mapping(uint256 => uint64) public lastDeliveryRequestAt;
+    struct PendingSource {
+        bytes32 sourceHash;
+        uint64 readyAt;
+    }
+
+    uint64 public constant REQUEST_SOURCE_DELAY = 7 days;
+    uint64 public constant EMERGENCY_REFUND_PAID_DELAY = 30 days;
+    uint64 public constant EMERGENCY_REFUND_SHIPPED_DELAY = 60 days;
+    uint64 public constant DISPUTE_RESOLUTION_DELAY = 3 days;
+    PendingSource public pendingRequestSource;
+    address public evidenceRegistry;
 
     event OrderCreated(
         uint256 indexed orderId,
@@ -67,32 +88,56 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
     event DeliveryRecorded(uint256 indexed orderId, uint64 timestamp);
     event DeliveryQueryFailed(uint256 indexed orderId, bytes32 indexed requestId, string reason);
     event OrderAutoCompleted(uint256 indexed orderId);
+    event SubscriptionIdUpdated(uint64 oldSubscriptionId, uint64 newSubscriptionId);
+    event DonIdUpdated(bytes32 oldDonId, bytes32 newDonId);
+    event CallbackGasLimitUpdated(uint32 oldCallbackGasLimit, uint32 newCallbackGasLimit);
+    event RequestSourceUpdated(bytes32 indexed sourceHash, uint256 length);
+    event EncryptedSecretsReferenceUpdated(bytes32 indexed referenceHash, uint256 length);
+    event RequestSourceProposed(bytes32 indexed sourceHash, uint256 length, uint64 readyAt);
+    event RequestSourceProposalCancelled(bytes32 indexed sourceHash);
+    event EvidenceRegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
 
     modifier orderExists(uint256 orderId) {
         require(orderId > 0 && orderId < nextOrderId, "Order does not exist");
         _;
     }
 
-    constructor(address vaultAddress, address routerAddress) Ownable(msg.sender) FunctionsClient(routerAddress) {
+    constructor(
+        address vaultAddress,
+        address routerAddress,
+        string memory initialRequestSource
+    ) Ownable(msg.sender) FunctionsClient(routerAddress) {
         require(vaultAddress != address(0), "Vault cannot be zero address");
         require(routerAddress != address(0), "Router cannot be zero address");
+        require(bytes(initialRequestSource).length > 0, "Initial request source cannot be empty");
 
         nextOrderId = 1;
         vault = EscrowVaultV3(payable(vaultAddress));
         functionsRouter = routerAddress;
         callbackGasLimit = 300_000;
-        requestSource = "return Functions.encodeString('pending')";
+        requestSource = initialRequestSource;
     }
 
     receive() external payable {
         revert("Direct ETH transfers are not allowed");
     }
 
-    function createOrder(address seller, uint256 productId, uint256 amount) external returns (uint256) {
+    // Owner-only emergency brake. When paused, new payments / shipments / receipts /
+    // disputes / delivery requests are rejected. cancelOrder, resolveDispute, and
+    // ownerEmergencyRefund stay available so locked funds can always be unwound.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    function createOrder(address seller, uint256 productId, uint256 amount) external whenNotPaused returns (uint256) {
         return _createOrderInternal(seller, productId, amount);
     }
 
-    function createAndPay(address seller, uint256 productId) external payable returns (uint256) {
+    function createAndPay(address seller, uint256 productId) external payable nonReentrant whenNotPaused returns (uint256) {
         require(msg.value > 0, "Amount must be greater than zero");
 
         uint256 orderId = _createOrderInternal(seller, productId, msg.value);
@@ -120,7 +165,8 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
             paidAt: 0,
             shippedAt: 0,
             completedAt: 0,
-            deliveredAt: 0
+            deliveredAt: 0,
+            disputedAt: 0
         });
 
         buyerOrders[msg.sender].push(orderId);
@@ -131,7 +177,7 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
         return orderId;
     }
 
-    function payOrder(uint256 orderId) external payable orderExists(orderId) {
+    function payOrder(uint256 orderId) external payable nonReentrant whenNotPaused orderExists(orderId) {
         _payOrderInternal(orderId);
     }
 
@@ -150,7 +196,7 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
         vault.lockFunds{value: msg.value}(orderId);
     }
 
-    function markShipped(uint256 orderId) external orderExists(orderId) {
+    function markShipped(uint256 orderId) external whenNotPaused orderExists(orderId) {
         Order storage order = orders[orderId];
 
         require(msg.sender == order.seller, "Only seller can mark shipped");
@@ -162,7 +208,7 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
         emit OrderShipped(orderId, msg.sender);
     }
 
-    function confirmReceived(uint256 orderId) external orderExists(orderId) {
+    function confirmReceived(uint256 orderId) external nonReentrant whenNotPaused orderExists(orderId) {
         Order storage order = orders[orderId];
 
         require(msg.sender == order.buyer, "Only buyer can confirm receipt");
@@ -182,7 +228,7 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
         emit OrderCancelled(orderId);
     }
 
-    function openDispute(uint256 orderId) external orderExists(orderId) {
+    function openDispute(uint256 orderId) external whenNotPaused orderExists(orderId) {
         Order storage order = orders[orderId];
 
         require(msg.sender == order.buyer || msg.sender == order.seller, "Only buyer or seller can open dispute");
@@ -192,14 +238,19 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
         );
 
         order.status = OrderStatus.Disputed;
+        order.disputedAt = uint64(block.timestamp);
 
         emit DisputeOpened(orderId, msg.sender);
     }
 
-    function resolveDispute(uint256 orderId, bool refundBuyer) external onlyOwner orderExists(orderId) {
+    function resolveDispute(uint256 orderId, bool refundBuyer) external nonReentrant onlyOwner orderExists(orderId) {
         Order storage order = orders[orderId];
 
         require(order.status == OrderStatus.Disputed, "Order must be Disputed");
+        require(
+            block.timestamp >= uint256(order.disputedAt) + DISPUTE_RESOLUTION_DELAY,
+            "Dispute resolution delay has not elapsed"
+        );
 
         uint256 amount = order.amount;
 
@@ -212,19 +263,28 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
 
             emit OrderRefunded(orderId, buyer, amount);
 
-            vault.releaseTo(orderId, payable(buyer));
+            vault.releaseTo(orderId, buyer);
         } else {
             _completeOrder(orderId, order);
         }
     }
 
-    function ownerEmergencyRefund(uint256 orderId) external onlyOwner orderExists(orderId) {
+    function ownerEmergencyRefund(uint256 orderId) external nonReentrant onlyOwner orderExists(orderId) {
         Order storage order = orders[orderId];
 
-        require(
-            order.status == OrderStatus.Paid || order.status == OrderStatus.Shipped || order.status == OrderStatus.Disputed,
-            "Order must have escrowed funds"
-        );
+        if (order.status == OrderStatus.Paid) {
+            require(
+                block.timestamp >= uint256(order.paidAt) + EMERGENCY_REFUND_PAID_DELAY,
+                "Order not stale enough for emergency refund"
+            );
+        } else if (order.status == OrderStatus.Shipped) {
+            require(
+                block.timestamp >= uint256(order.shippedAt) + EMERGENCY_REFUND_SHIPPED_DELAY,
+                "Order not stale enough for emergency refund"
+            );
+        } else {
+            revert("Order must be Paid or Shipped");
+        }
 
         uint256 amount = order.amount;
         address buyer = order.buyer;
@@ -233,14 +293,19 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
 
         emit OrderEmergencyRefunded(orderId, buyer, amount);
 
-        vault.releaseTo(orderId, payable(buyer));
+        vault.releaseTo(orderId, buyer);
     }
 
-    function requestDelivery(uint256 orderId) external orderExists(orderId) returns (bytes32) {
+    function requestDelivery(uint256 orderId) external whenNotPaused orderExists(orderId) returns (bytes32) {
         Order storage order = orders[orderId];
 
         require(order.status == OrderStatus.Shipped, "Order must be Shipped");
         require(order.deliveredAt == 0, "Delivery already recorded");
+        require(
+            block.timestamp >= uint256(lastDeliveryRequestAt[orderId]) + DELIVERY_REQUEST_COOLDOWN,
+            "Delivery request cooldown"
+        );
+        lastDeliveryRequestAt[orderId] = uint64(block.timestamp);
 
         FunctionsRequest.Request memory request;
         request.initializeRequestForInlineJavaScript(requestSource);
@@ -262,28 +327,77 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
     }
 
     function setSubscriptionId(uint64 newSubscriptionId) external onlyOwner {
+        uint64 oldSubscriptionId = subscriptionId;
         subscriptionId = newSubscriptionId;
+        emit SubscriptionIdUpdated(oldSubscriptionId, newSubscriptionId);
     }
 
     function setDonId(bytes32 newDonId) external onlyOwner {
+        bytes32 oldDonId = donID;
         donID = newDonId;
+        emit DonIdUpdated(oldDonId, newDonId);
     }
 
     function setCallbackGasLimit(uint32 newCallbackGasLimit) external onlyOwner {
         require(newCallbackGasLimit > 0, "Callback gas limit cannot be zero");
+        uint32 oldCallbackGasLimit = callbackGasLimit;
         callbackGasLimit = newCallbackGasLimit;
+        emit CallbackGasLimitUpdated(oldCallbackGasLimit, newCallbackGasLimit);
     }
 
-    function setRequestSource(string calldata newRequestSource) external onlyOwner {
+    function setEvidenceRegistry(address newRegistry) external onlyOwner {
+        if (newRegistry != address(0)) {
+            require(
+                IEvidenceRegistryV3(newRegistry).marketplace() == address(this),
+                "Registry marketplace mismatch"
+            );
+        }
+        address oldRegistry = evidenceRegistry;
+        evidenceRegistry = newRegistry;
+        emit EvidenceRegistryUpdated(oldRegistry, newRegistry);
+    }
+
+    function proposeRequestSource(string calldata newRequestSource) external onlyOwner {
         require(bytes(newRequestSource).length > 0, "Request source cannot be empty");
+        require(pendingRequestSource.sourceHash == bytes32(0), "Existing proposal must be cancelled first");
+
+        bytes32 hash = keccak256(bytes(newRequestSource));
+        uint64 readyAt = uint64(block.timestamp) + REQUEST_SOURCE_DELAY;
+
+        pendingRequestSource = PendingSource({ sourceHash: hash, readyAt: readyAt });
+
+        emit RequestSourceProposed(hash, bytes(newRequestSource).length, readyAt);
+    }
+
+    function commitRequestSource(string calldata newRequestSource) external onlyOwner {
+        bytes32 hash = keccak256(bytes(newRequestSource));
+        require(pendingRequestSource.sourceHash == hash, "Source does not match pending proposal");
+        require(block.timestamp >= pendingRequestSource.readyAt, "Proposal delay has not elapsed");
+
         requestSource = newRequestSource;
+        delete pendingRequestSource;
+
+        emit RequestSourceUpdated(hash, bytes(newRequestSource).length);
+    }
+
+    function cancelPendingRequestSource() external onlyOwner {
+        bytes32 hash = pendingRequestSource.sourceHash;
+        require(hash != bytes32(0), "No pending proposal");
+
+        delete pendingRequestSource;
+
+        emit RequestSourceProposalCancelled(hash);
     }
 
     function setEncryptedSecretsReference(bytes calldata newEncryptedSecretsReference) external onlyOwner {
         encryptedSecretsReference = newEncryptedSecretsReference;
+        emit EncryptedSecretsReferenceUpdated(
+            keccak256(newEncryptedSecretsReference),
+            newEncryptedSecretsReference.length
+        );
     }
 
-    function autoConfirmAfterDelivery(uint256 orderId) external orderExists(orderId) {
+    function autoConfirmAfterDelivery(uint256 orderId) external nonReentrant whenNotPaused orderExists(orderId) {
         Order storage order = orders[orderId];
 
         require(order.status == OrderStatus.Shipped, "Order must be Shipped");
@@ -304,11 +418,18 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
 
         emit OrderCompleted(orderId, seller, amount);
 
-        vault.releaseTo(orderId, payable(seller));
+        vault.releaseTo(orderId, seller);
     }
 
     function fulfillRequest(bytes32 requestId, bytes memory response, bytes memory err) internal override {
         uint256 orderId = deliveryRequestToOrderId[requestId];
+
+        if (orderId == 0) {
+            // Unknown or already-handled requestId — drop silently.
+            return;
+        }
+
+        delete deliveryRequestToOrderId[requestId];
 
         if (err.length > 0) {
             emit DeliveryQueryFailed(orderId, requestId, string(err));
@@ -324,6 +445,13 @@ contract EscrowMarketplaceV3 is Ownable, FunctionsClient {
         Order storage order = orders[orderId];
 
         if (order.status != OrderStatus.Shipped || order.deliveredAt != 0) {
+            return;
+        }
+
+        // M2: sanity-check the DON-supplied timestamp. Must be no earlier than
+        // shippedAt and no later than the current block.
+        if (deliveredTimestamp < order.shippedAt || deliveredTimestamp > uint64(block.timestamp)) {
+            emit DeliveryQueryFailed(orderId, requestId, "Invalid delivered timestamp");
             return;
         }
 

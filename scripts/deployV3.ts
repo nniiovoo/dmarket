@@ -1,4 +1,6 @@
 import { network } from "hardhat";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const FUNCTIONS_ROUTERS: Record<string, string> = {
   sepolia: "0xb83E47C2bC239B3bf370bc41e1459A34b41238D0",
@@ -26,6 +28,8 @@ async function main() {
   const vaultOverrides = isAmoy ? { gasLimit: 900_000n } : {};
   const marketplaceOverrides = isAmoy ? { gasLimit: 4_500_000n } : {};
   const wiringOverrides = isAmoy ? { gasLimit: 90_000n } : {};
+  const sourcePath = join(process.cwd(), "chainlink/functions/deliveryStatus.js");
+  const initialSource = readFileSync(sourcePath, "utf8");
 
   console.log("Deploying ChainUs v3...");
   console.log("Network name:", connection.networkName);
@@ -47,7 +51,7 @@ async function main() {
   console.log("V3 vault deployment tx hash:", vaultDeploymentTx.hash);
 
   const MarketplaceFactory = await ethers.getContractFactory("EscrowMarketplaceV3", deployer);
-  const marketplace = await MarketplaceFactory.deploy(vaultAddress, routerAddress, marketplaceOverrides);
+  const marketplace = await MarketplaceFactory.deploy(vaultAddress, routerAddress, initialSource, marketplaceOverrides);
   const marketplaceDeploymentTx = marketplace.deploymentTransaction();
 
   if (marketplaceDeploymentTx === null) {
@@ -59,6 +63,7 @@ async function main() {
 
   console.log("V3 marketplace address:", marketplaceAddress);
   console.log("V3 marketplace deployment tx hash:", marketplaceDeploymentTx.hash);
+  console.log("Initial requestSource chars:", initialSource.length);
 
   const wiringTx = await vault.connect(deployer).setMarketplace(marketplaceAddress, wiringOverrides);
   await wiringTx.wait();
