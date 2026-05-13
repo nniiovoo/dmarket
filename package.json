@@ -9,7 +9,9 @@
     "test": "hardhat test"
   },
   "devDependencies": {
+    "@chainlink/contracts": "^1.5.0",
     "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.5",
+    "@openzeppelin/contracts": "^5.0.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "^25.6.2",
     "dotenv": "^17.4.2",
