@@ -5,7 +5,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { Hash } from "viem";
 import { useAccount, useChainId, useSignMessage, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 
-import { CARRIERS, type CarrierCode } from "@/lib/carriers";
+import { CarrierBadge } from "@/components/CarrierBadge";
+import { CARRIERS, detectCarrier, type CarrierCode } from "@/lib/carriers";
 import { updateShipping } from "@/lib/api/shipping";
 import { escrowMarketplaceV2Abi, getContractAddresses, isSupportedChain } from "@/lib/contracts";
 import { decodeDappError } from "@/lib/errors";
@@ -28,7 +29,6 @@ export function ShipWithTrackingDialog({
   const canSendOnCurrentChain = isSupportedChain(currentChainId) && onOrderChain;
   const { writeContractAsync, isPending: walletPending } = useWriteContract();
   const { signMessageAsync } = useSignMessage();
-  const [carrier, setCarrier] = useState<CarrierCode>("sf");
   const [trackingNumber, setTrackingNumber] = useState("");
   const [manualUrl, setManualUrl] = useState("");
   const [shippingNote, setShippingNote] = useState("");
@@ -39,8 +39,18 @@ export function ShipWithTrackingDialog({
   const [error, setError] = useState<string | undefined>();
   const handledReceipt = useRef<Hash | undefined>(undefined);
   const receipt = useWaitForTransactionReceipt({ hash });
+  // Only consider the receipt query "pending" once a hash has actually been
+  // submitted. tanstack-query reports isPending=true for disabled queries,
+  // which would otherwise leave the button stuck on "Waiting for chain...".
+  const receiptPending = hash !== undefined && receipt.isPending;
   const normalizedTracking = trackingNumber.trim();
   const hasShippingDetails = normalizedTracking.length > 0;
+  // Carrier is derived entirely from the tracking number — no manual dropdown.
+  // When detection fails we fall through to "other" so the seller can paste
+  // a manual tracking URL.
+  const detected = useMemo(() => detectCarrier(normalizedTracking), [normalizedTracking]);
+  const carrier: CarrierCode = detected ?? "other";
+  const wasAutoDetected = detected !== undefined;
   const validation = useMemo(() => {
     if (!hasShippingDetails) {
       return undefined;
@@ -56,7 +66,7 @@ export function ShipWithTrackingDialog({
 
     return undefined;
   }, [carrier, hasShippingDetails, manualUrl]);
-  const busy = walletPending || receipt.isPending || shippingPhase !== "idle";
+  const busy = walletPending || receiptPending || shippingPhase !== "idle";
 
   const saveShippingDetails = useCallback(async () => {
     if (!hasShippingDetails || validation) {
@@ -173,21 +183,31 @@ export function ShipWithTrackingDialog({
 
         <div className="mt-5 space-y-4">
           <label className="block">
-            <span className="text-sm font-medium text-slate-700">Carrier</span>
-            <select
-              value={carrier}
-              onChange={(event) => setCarrier(event.target.value as CarrierCode)}
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 outline-none"
-            >
-              {Object.entries(CARRIERS).map(([code, config]) => (
-                <option key={code} value={code}>
-                  {config.name}
-                </option>
-              ))}
-            </select>
+            <span className="text-sm font-medium text-slate-700">Tracking number</span>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                value={trackingNumber}
+                onChange={(event) => setTrackingNumber(event.target.value)}
+                placeholder="SF1234567890"
+                className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 outline-none"
+              />
+              {wasAutoDetected ? <CarrierBadge code={carrier} /> : null}
+            </div>
+            {hasShippingDetails ? (
+              wasAutoDetected ? (
+                <span className="mt-1 inline-flex items-center rounded bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                  已自动识别为 {CARRIERS[carrier].name}
+                </span>
+              ) : (
+                <span className="mt-1 inline-flex items-center rounded bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+                  未识别快递公司，请填写手动追踪链接
+                </span>
+              )
+            ) : null}
           </label>
-          <Field label="Tracking number" value={trackingNumber} onChange={setTrackingNumber} placeholder="SF1234567890" />
-          {carrier === "other" ? <Field label="Manual tracking URL" value={manualUrl} onChange={setManualUrl} placeholder="https://..." /> : null}
+          {hasShippingDetails && !wasAutoDetected ? (
+            <Field label="Manual tracking URL" value={manualUrl} onChange={setManualUrl} placeholder="https://..." />
+          ) : null}
           <Field label="Note" value={shippingNote} onChange={setShippingNote} placeholder="Optional shipping note" />
           <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">
             On-chain shipment confirmation is required. Tracking details are optional and can be skipped.
@@ -213,7 +233,7 @@ export function ShipWithTrackingDialog({
               disabled={busy || validation !== undefined || !contracts?.marketplace || !canSendOnCurrentChain || Boolean(success)}
               className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
             >
-              {buttonLabel({ walletPending, receiptPending: receipt.isPending, shippingPhase, chainConfirmed, hasShippingDetails })}
+              {buttonLabel({ walletPending, receiptPending, shippingPhase, chainConfirmed, hasShippingDetails })}
             </button>
           </div>
         </div>

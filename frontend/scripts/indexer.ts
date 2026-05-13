@@ -7,7 +7,13 @@ const once = process.argv.includes("--once");
 
 async function main() {
   for (const chainId of INDEXED_CHAIN_IDS) {
-    await catchUpFromState(chainId);
+    try {
+      await catchUpFromState(chainId);
+    } catch (error) {
+      // Transient RPC failures (rate limits, brief outages) shouldn't kill the
+      // indexer at startup — log and let the periodic loop retry.
+      console.error(`[chain ${chainId}] initial catch-up failed, will retry on next tick`, error);
+    }
   }
 
   if (once) {
