@@ -51,7 +51,9 @@ const NETWORK_CONFIG: Record<
 };
 
 const CALLBACK_GAS_LIMIT = 300_000;
-const SECRETS_EXPIRATION_MINUTES = 60 * 24 * 7; // 7 days
+// Chainlink DON caps secrets expiration. Sepolia/Amoy currently allow up
+// to ~72 hours. Keep 3 days as safety margin.
+const SECRETS_EXPIRATION_MINUTES = 60 * 24 * 3; // 3 days
 const SECRETS_SLOT_ID = 1;  // marketplace uses slot 0
 
 function requireEnv(name: string): string {
@@ -118,9 +120,19 @@ async function main() {
   console.log("  secrets slot:  ", SECRETS_SLOT_ID);
 
   // 1. Upload secrets to DON slot 1.
+  // functions-toolkit (0.3.x) ships ethers v5 internally and SecretsManager
+  // constructs ethers.Contract directly, which rejects v6 signers from
+  // hardhat-ethers. Use createRequire to grab v5 from the nested install.
+  const { createRequire } = await import("node:module");
+  const requireCJS = createRequire(import.meta.url);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ethersV5: any = requireCJS("@chainlink/functions-toolkit/node_modules/ethers");
+  const rpcUrl = requireEnv(networkName === "sepolia" ? "SEPOLIA_RPC_URL" : "AMOY_RPC_URL");
+  const v5Provider = new ethersV5.providers.JsonRpcProvider(rpcUrl);
+  const v5Wallet = new ethersV5.Wallet(requireEnv("PRIVATE_KEY"), v5Provider);
+
   const secretsManager = new SecretsManager({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    signer: owner as any,
+    signer: v5Wallet,
     functionsRouterAddress: cfg.routerAddress,
     donId: cfg.donId
   });
