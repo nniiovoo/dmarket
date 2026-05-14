@@ -8,12 +8,12 @@ import { useChainId } from "wagmi";
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { fetchProducts, type Product } from "@/lib/api/products";
-import { isSupportedChain } from "@/lib/contracts";
+import { hasMarketplace } from "@/lib/contracts";
 import { supportedChains } from "@/lib/chains";
 
 export default function ProductsPage() {
   const chainId = useChainId();
-  const supported = isSupportedChain(chainId);
+  const supported = hasMarketplace(chainId);
   const chainName = useMemo(() => supportedChains.find((chain) => chain.id === chainId)?.name ?? "current network", [chainId]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,7 +78,7 @@ export default function ProductsPage() {
         ) : error ? (
           <EmptyState title="Could not load products" body={error} />
         ) : !supported ? (
-          <EmptyState title="Unsupported network" body="Switch to Sepolia or Polygon Amoy to browse products." />
+          <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia to browse products." />
         ) : products.length === 0 ? (
           <EmptyState title="No products yet" body="No active products on this chain. Create the first listing from Sell." />
         ) : (

@@ -19,7 +19,7 @@ import { TrackingLink } from "@/components/TrackingLink";
 import { TxPanel } from "@/components/TxPanel";
 import { fetchOrder } from "@/lib/api/orders";
 import { getExplorerAddressUrl } from "@/lib/chains";
-import { escrowMarketplaceV2Abi, escrowVaultAbi, getContractAddresses, isSupportedChain } from "@/lib/contracts";
+import { escrowVaultAbi, getActiveMarketplace, hasMarketplace, type ActiveMarketplace } from "@/lib/contracts";
 import { formatAmount, formatTimestamp, normalizeOrder, OrderStatus } from "@/lib/order";
 import { computeActions, getRole, type AvailableAction } from "@/lib/orderPermissions";
 import { computeTimeline } from "@/lib/orderTimeline";
@@ -34,19 +34,19 @@ export default function OrderDetailPage() {
   const orderId = useMemo(() => parseOrderId(params.orderId), [params.orderId]);
   const chainId = useChainId();
   const { address, isConnected } = useAccount();
-  const contracts = getContractAddresses(chainId);
-  const supported = isSupportedChain(chainId);
+  const active = getActiveMarketplace(chainId);
+  const supported = hasMarketplace(chainId);
 
   const orderQuery = useReadContract({
-    address: contracts?.marketplace,
-    abi: escrowMarketplaceV2Abi,
+    address: active?.address,
+    abi: active?.abi,
     functionName: "getOrder",
     args: orderId === undefined ? undefined : [orderId],
     query: { enabled: supported && orderId !== undefined, refetchInterval, retry: false }
   });
 
   const vaultQuery = useReadContract({
-    address: contracts?.vault,
+    address: active?.vault,
     abi: escrowVaultAbi,
     functionName: "lockedAmount",
     args: orderId === undefined ? undefined : [orderId],
@@ -54,8 +54,8 @@ export default function OrderDetailPage() {
   });
 
   const ownerQuery = useReadContract({
-    address: contracts?.marketplace,
-    abi: escrowMarketplaceV2Abi,
+    address: active?.address,
+    abi: active?.abi,
     functionName: "owner",
     query: { enabled: supported, refetchInterval }
   });
@@ -110,7 +110,7 @@ export default function OrderDetailPage() {
       {!isConnected ? (
         <EmptyState title="Connect wallet" body="Connect a wallet to read and act on this order." />
       ) : !supported ? (
-        <EmptyState title="Unsupported network" body="Switch to Sepolia or Polygon Amoy." />
+        <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia." />
       ) : orderId === undefined ? (
         <EmptyState title="Invalid order ID" body="Use a positive numeric order ID." />
       ) : orderQuery.isLoading ? (
@@ -148,7 +148,8 @@ export default function OrderDetailPage() {
                     order={order}
                     apiOrder={orderApi.data}
                     orderId={orderId}
-                    marketplaceAddress={contracts?.marketplace}
+                    active={active}
+                    chainId={chainId}
                     onConfirmed={refetchAll}
                     onOpenShipDialog={() => setShowShipDialog(true)}
                   />
@@ -292,7 +293,8 @@ function ActionExecutor({
   order,
   apiOrder,
   orderId,
-  marketplaceAddress,
+  active,
+  chainId,
   onConfirmed,
   onOpenShipDialog
 }: {
@@ -300,7 +302,8 @@ function ActionExecutor({
   order: NonNullable<ReturnType<typeof normalizeOrder>>;
   apiOrder: ApiOrder | undefined;
   orderId: bigint;
-  marketplaceAddress: string | undefined;
+  active: ActiveMarketplace | undefined;
+  chainId: number;
   onConfirmed: () => void;
   onOpenShipDialog: () => void;
 }) {
@@ -324,8 +327,9 @@ function ActionExecutor({
           description="争议仲裁结果：托管资金退回买家。"
           onConfirmed={onConfirmed}
           buildTransaction={() => ({
-            address: marketplaceAddress,
-            abi: escrowMarketplaceV2Abi,
+            address: active?.address,
+            abi: active?.abi,
+            chainId,
             functionName: "resolveDispute",
             args: [orderId, true]
           })}
@@ -335,8 +339,9 @@ function ActionExecutor({
           description="争议仲裁结果：托管资金释放给卖家。"
           onConfirmed={onConfirmed}
           buildTransaction={() => ({
-            address: marketplaceAddress,
-            abi: escrowMarketplaceV2Abi,
+            address: active?.address,
+            abi: active?.abi,
+            chainId,
             functionName: "resolveDispute",
             args: [orderId, false]
           })}
@@ -353,7 +358,8 @@ function ActionExecutor({
       buildTransaction={() => buildActionTransaction(action.action, {
         order,
         orderId,
-        marketplaceAddress
+        active,
+        chainId
       })}
     />
   );
@@ -364,17 +370,20 @@ function buildActionTransaction(
   {
     order,
     orderId,
-    marketplaceAddress
+    active,
+    chainId
   }: {
     order: NonNullable<ReturnType<typeof normalizeOrder>>;
     orderId: bigint;
-    marketplaceAddress: string | undefined;
+    active: ActiveMarketplace | undefined;
+    chainId: number;
   }
 ) {
   if (action === "pay") {
     return {
-      address: marketplaceAddress,
-      abi: escrowMarketplaceV2Abi,
+      address: active?.address,
+      abi: active?.abi,
+      chainId,
       functionName: "payOrder",
       args: [orderId],
       value: order.amount
@@ -383,8 +392,9 @@ function buildActionTransaction(
 
   if (action === "cancel") {
     return {
-      address: marketplaceAddress,
-      abi: escrowMarketplaceV2Abi,
+      address: active?.address,
+      abi: active?.abi,
+      chainId,
       functionName: "cancelOrder",
       args: [orderId]
     };
@@ -392,8 +402,9 @@ function buildActionTransaction(
 
   if (action === "confirmReceived") {
     return {
-      address: marketplaceAddress,
-      abi: escrowMarketplaceV2Abi,
+      address: active?.address,
+      abi: active?.abi,
+      chainId,
       functionName: "confirmReceived",
       args: [orderId]
     };
@@ -401,16 +412,18 @@ function buildActionTransaction(
 
   if (action === "openDispute") {
     return {
-      address: marketplaceAddress,
-      abi: escrowMarketplaceV2Abi,
+      address: active?.address,
+      abi: active?.abi,
+      chainId,
       functionName: "openDispute",
       args: [orderId]
     };
   }
 
   return {
-    address: marketplaceAddress,
-    abi: escrowMarketplaceV2Abi,
+    address: active?.address,
+    abi: active?.abi,
+    chainId,
     functionName: "ownerEmergencyRefund",
     args: [orderId]
   };

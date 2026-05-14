@@ -25,7 +25,7 @@ export function AllOrdersList({ seller, chainId, enabled }: { seller: string | u
   });
 
   if (!enabled || seller === undefined) {
-    return <EmptyState title="Wallet required" body="Connect a seller wallet on Sepolia or Amoy." />;
+    return <EmptyState title="Wallet required" body="Connect a seller wallet on a supported chain." />;
   }
 
   if (ordersQuery.isLoading) {

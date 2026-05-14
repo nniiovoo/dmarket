@@ -16,7 +16,7 @@ export function PendingOrdersList({ seller, chainId, enabled }: { seller: string
   });
 
   if (!enabled || seller === undefined) {
-    return <EmptyState title="Wallet required" body="Connect a seller wallet on Sepolia or Amoy." />;
+    return <EmptyState title="Wallet required" body="Connect a seller wallet on a supported chain." />;
   }
 
   if (pendingQuery.isLoading) {

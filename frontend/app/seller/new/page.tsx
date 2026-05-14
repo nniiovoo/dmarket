@@ -9,14 +9,14 @@ import { Card, EmptyState } from "@/components/Card";
 import { ImageUpload } from "@/components/ImageUpload";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { createProduct } from "@/lib/api/products";
-import { isSupportedChain } from "@/lib/contracts";
+import { hasMarketplace } from "@/lib/contracts";
 
 export default function NewProductPage() {
   const router = useRouter();
   const chainId = useChainId();
   const { address, isConnected } = useAccount();
   const { signMessageAsync } = useSignMessage();
-  const supported = isSupportedChain(chainId);
+  const supported = hasMarketplace(chainId);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [priceEth, setPriceEth] = useState("0.0001");
@@ -70,7 +70,7 @@ export default function NewProductPage() {
         {!isConnected ? (
           <EmptyState title="Connect wallet" body="Connect the seller wallet before creating a product." />
         ) : !supported ? (
-          <EmptyState title="Unsupported network" body="Switch to Sepolia or Polygon Amoy." />
+          <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia." />
         ) : (
           <div className="space-y-4">
             <Field label="Name" value={name} onChange={setName} placeholder="Vintage hoodie" />

@@ -12,7 +12,7 @@ import { NetworkNotice } from "@/components/NetworkNotice";
 import { OrderCard } from "@/components/OrderCard";
 import { fetchOrders } from "@/lib/api/orders";
 import { explorerByChainId, getExplorerAddressUrl, getFaucetUrl } from "@/lib/chains";
-import { escrowMarketplaceV2Abi, getContractAddresses, isSupportedChain } from "@/lib/contracts";
+import { getActiveMarketplace, hasMarketplace } from "@/lib/contracts";
 import { useOptimisticOrder, type PendingOrder } from "@/lib/useOptimisticOrder";
 
 const refetchInterval = 12_000;
@@ -23,13 +23,27 @@ export default function HomePage() {
   const { address, isConnected } = useAccount();
   const [manualOrderId, setManualOrderId] = useState("");
   const optimistic = useOptimisticOrder();
-  const contracts = getContractAddresses(chainId);
-  const supported = isSupportedChain(chainId);
+  const active = getActiveMarketplace(chainId);
+  const supported = hasMarketplace(chainId);
+  const heroTitle =
+    active?.version === "v3" ? "Escrow Marketplace v3" : active?.version === "v2" ? "Escrow Marketplace v2" : "Escrow Marketplace";
+  const heroSubtitle =
+    active?.version === "v3"
+      ? "v3 with Kleros V2 decentralized arbitration on Arbitrum Sepolia."
+      : active?.version === "v2"
+        ? "Create orders, escrow funds in the vault, ship, confirm receipt, and handle disputes on Sepolia or Polygon Amoy."
+        : "Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia to interact with the marketplace.";
+  const networkStatus =
+    active?.version === "v3"
+      ? "Connected: Arbitrum Sepolia (v3 + Kleros)"
+      : active?.version === "v2"
+        ? `Connected: ${chainId === 11155111 ? "Sepolia" : "Polygon Amoy"} (v2)`
+        : undefined;
   const balance = useBalance({ address, query: { enabled: address !== undefined } });
 
   const nextOrderId = useReadContract({
-    address: contracts?.marketplace,
-    abi: escrowMarketplaceV2Abi,
+    address: active?.address,
+    abi: active?.abi,
     functionName: "nextOrderId",
     query: { enabled: supported, refetchInterval }
   });
@@ -85,11 +99,8 @@ export default function HomePage() {
       <NetworkNotice />
       <section className="rounded-lg bg-slate-950 p-6 text-white">
         <p className="text-sm text-slate-300">Phase 3 frontend</p>
-        <h1 className="mt-2 text-3xl font-semibold">Escrow Marketplace v2</h1>
-        <p className="mt-3 max-w-3xl text-slate-300">
-          Create orders, escrow funds in the vault, ship, confirm receipt, and handle disputes on Sepolia or Polygon
-          Amoy.
-        </p>
+        <h1 className="mt-2 text-3xl font-semibold">{heroTitle}</h1>
+        <p className="mt-3 max-w-3xl text-slate-300">{heroSubtitle}</p>
         <div className="mt-5 flex flex-wrap gap-3">
           <Link href="/create" className="rounded-md bg-white px-4 py-2 text-sm font-medium text-slate-950">
             Create order
@@ -110,16 +121,17 @@ export default function HomePage() {
           {!isConnected ? (
             <EmptyState title="Connect wallet" body="Connect a wallet to read your buyer and seller orders." />
           ) : !supported ? (
-            <EmptyState title="Unsupported network" body="Switch to Sepolia or Polygon Amoy." />
+            <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia." />
           ) : (
             <div className="space-y-3 text-sm">
+              <InfoRow label="Status" value={networkStatus} />
               <InfoRow label="Chain ID" value={String(chainId)} />
               <InfoRow
                 label="Marketplace"
-                value={contracts?.marketplace}
-                href={getExplorerAddressUrl(chainId, contracts?.marketplace)}
+                value={active?.address}
+                href={getExplorerAddressUrl(chainId, active?.address)}
               />
-              <InfoRow label="Vault" value={contracts?.vault} href={getExplorerAddressUrl(chainId, contracts?.vault)} />
+              <InfoRow label="Vault" value={active?.vault} href={getExplorerAddressUrl(chainId, active?.vault)} />
               <InfoRow
                 label="Next order ID"
                 value={nextOrderId.isLoading ? undefined : String((nextOrderId.data as bigint | undefined) ?? "-")}
@@ -205,7 +217,7 @@ function OrderList({
   return (
     <Card title={title}>
       {!chainReady ? (
-        <EmptyState title="Wallet required" body="Connect on Sepolia or Amoy to load orders." />
+        <EmptyState title="Wallet required" body="Connect on a supported chain to load orders." />
       ) : query.isLoading && visibleOrders.length === 0 ? (
         <div className="space-y-2">
           <SkeletonLine />

@@ -9,7 +9,7 @@ import { BuyNowButton } from "@/components/BuyNowButton";
 import { Card, EmptyState } from "@/components/Card";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { TxPanel } from "@/components/TxPanel";
-import { escrowMarketplaceV2Abi, getContractAddresses, isSupportedChain } from "@/lib/contracts";
+import { getActiveMarketplace, hasMarketplace } from "@/lib/contracts";
 
 export default function CreateOrderPage() {
   return (
@@ -53,8 +53,8 @@ function CreateOrderForm({
 }) {
   const chainId = useChainId();
   const { address, isConnected } = useAccount();
-  const contracts = getContractAddresses(chainId);
-  const supported = isSupportedChain(chainId);
+  const active = getActiveMarketplace(chainId);
+  const supported = hasMarketplace(chainId);
   const [seller, setSeller] = useState(initialSeller);
   const [productId, setProductId] = useState(initialProductId);
   const [amount, setAmount] = useState(initialAmount);
@@ -76,7 +76,7 @@ function CreateOrderForm({
         {!isConnected ? (
           <EmptyState title="Connect wallet" body="Connect the buyer wallet before creating an order." />
         ) : !supported ? (
-          <EmptyState title="Unsupported network" body="Switch to Sepolia or Polygon Amoy." />
+          <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia." />
         ) : (
           <div className="space-y-4">
             <Field label="Seller address" value={seller} onChange={setSeller} placeholder="0x..." />
@@ -96,8 +96,8 @@ function CreateOrderForm({
                 disabled={disabled}
                 disabledReason={validation}
                 buildTransaction={() => ({
-                  address: contracts?.marketplace,
-                  abi: escrowMarketplaceV2Abi,
+                  address: active?.address,
+                  abi: active?.abi,
                   functionName: "createOrder",
                   args: [seller, BigInt(productId), parseEther(amount)]
                 })}

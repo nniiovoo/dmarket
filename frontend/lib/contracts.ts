@@ -38,6 +38,24 @@ export type V3ContractAddresses = {
   klerosAdapter?: Address;
 };
 
+export type ActiveMarketplaceV2 = {
+  version: "v2";
+  abi: Abi;
+  address: Address;
+  vault: Address;
+};
+
+export type ActiveMarketplaceV3 = {
+  version: "v3";
+  abi: Abi;
+  address: Address;
+  vault: Address;
+  evidenceRegistry?: Address;
+  klerosAdapter?: Address;
+};
+
+export type ActiveMarketplace = ActiveMarketplaceV2 | ActiveMarketplaceV3;
+
 export function getContractAddresses(chainId: number | undefined): ContractAddresses | undefined {
   if (chainId === undefined) {
     return undefined;
@@ -110,6 +128,45 @@ export function getV3ContractAddresses(chainId: number | undefined): V3ContractA
 
 export function isSupportedChain(chainId: number | undefined) {
   return getContractAddresses(chainId) !== undefined;
+}
+
+/// Returns the marketplace ABI + address active on the given chain,
+/// auto-selecting V2 or V3. Components should call this rather than
+/// hardcoding V2 lookups so they work on Arbitrum Sepolia too.
+export function getActiveMarketplace(chainId: number | undefined): ActiveMarketplace | undefined {
+  if (chainId === undefined) return undefined;
+
+  if (chainId === sepolia.id || chainId === polygonAmoy.id) {
+    const v2 = getContractAddresses(chainId);
+    if (!v2) return undefined;
+    return {
+      version: "v2",
+      abi: escrowMarketplaceV2Abi,
+      address: v2.marketplace,
+      vault: v2.vault
+    };
+  }
+
+  if (chainId === arbitrumSepolia.id) {
+    const v3 = getV3ContractAddresses(chainId);
+    if (!v3) return undefined;
+    return {
+      version: "v3",
+      abi: escrowMarketplaceV3Abi,
+      address: v3.marketplace,
+      vault: v3.vault,
+      evidenceRegistry: v3.evidenceRegistry,
+      klerosAdapter: v3.klerosAdapter
+    };
+  }
+
+  return undefined;
+}
+
+/// Catch-all: any chain with either V2 or V3 deployed is "supported"
+/// for marketplace operations.
+export function hasMarketplace(chainId: number | undefined): boolean {
+  return getActiveMarketplace(chainId) !== undefined;
 }
 
 export function isV3Supported(chainId: number | undefined) {

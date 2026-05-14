@@ -186,3 +186,13 @@ cd frontend
 SEED_CHAIN=arbitrumSepolia npx tsx scripts/seedV3Orders.ts 1
 SEED_CHAIN=arbitrumSepolia npx tsx scripts/seedV3Evidence.ts 1
 ```
+
+### Multi-chain frontend behavior
+
+The frontend auto-adapts to the connected wallet's chain:
+- Sepolia / Polygon Amoy → V2 marketplace (legacy testnet orders)
+- Arbitrum Sepolia → V3 marketplace + Kleros V2 adapter
+
+Users can switch chains via the wallet connector and see the appropriate
+marketplace for that chain. Same order ID can exist on multiple chains
+(each chain has its own orderId space).

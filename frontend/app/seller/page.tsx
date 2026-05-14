@@ -13,13 +13,13 @@ import { PendingOrdersList } from "@/components/seller/PendingOrdersList";
 import { SellerTabs, type SellerTab } from "@/components/seller/SellerTabs";
 import { supportedChains } from "@/lib/chains";
 import { fetchSellerOrders } from "@/lib/api/seller";
-import { isSupportedChain } from "@/lib/contracts";
+import { hasMarketplace } from "@/lib/contracts";
 
 export default function SellerDashboardPage() {
   const chainId = useChainId();
   const { address, isConnected } = useAccount();
   const [activeTab, setActiveTab] = useState<SellerTab>("pending");
-  const supported = isSupportedChain(chainId);
+  const supported = hasMarketplace(chainId);
   const chainName = supportedChains.find((chain) => chain.id === chainId)?.name ?? `Chain ${chainId}`;
   const seller = address?.toLowerCase();
   const enabled = isConnected && supported && seller !== undefined;
@@ -50,7 +50,7 @@ export default function SellerDashboardPage() {
         {!isConnected ? (
           <EmptyState title="Connect wallet" body="Connect the seller wallet to manage products and orders." />
         ) : !supported ? (
-          <EmptyState title="Unsupported network" body="Switch to Sepolia or Polygon Amoy." />
+          <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia." />
         ) : (
           <div className="space-y-5">
             <SellerTabs activeTab={activeTab} pendingCount={pendingCount} onChange={setActiveTab} />

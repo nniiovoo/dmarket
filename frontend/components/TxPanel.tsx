@@ -7,7 +7,7 @@ import type { Hash } from "viem";
 
 import { decodeDappError, type DappError } from "@/lib/errors";
 import { getExplorerTxUrl, getFaucetUrl } from "@/lib/chains";
-import { isSupportedChain } from "@/lib/contracts";
+import { hasMarketplace } from "@/lib/contracts";
 
 type TxPanelProps = {
   label: string;
@@ -29,9 +29,9 @@ export function TxPanel({ label, description, disabled, disabledReason, buildTra
   const receipt = useWaitForTransactionReceipt({ hash });
   const txUrl = getExplorerTxUrl(chainId, hash);
   const faucetUrl = getFaucetUrl(chainId);
-  const supported = isSupportedChain(chainId);
+  const supported = hasMarketplace(chainId);
   const effectiveDisabled = disabled || !supported;
-  const effectiveDisabledReason = !supported ? "Switch to Sepolia or Polygon Amoy before sending transactions." : disabledReason;
+  const effectiveDisabledReason = !supported ? "Switch to a supported chain before sending transactions." : disabledReason;
 
   const status = useMemo(() => {
     if (error !== undefined) {
@@ -62,18 +62,20 @@ export function TxPanel({ label, description, disabled, disabledReason, buildTra
     if (!supported) {
       setError({
         title: "Unsupported network",
-        message: "Switch to Sepolia or Polygon Amoy before sending transactions.",
+        message: "Switch to a supported chain before sending transactions.",
         tone: "warning",
         category: "wrong-network"
       });
       return;
     }
 
+    const transaction = buildTransaction();
+    const transactionChainId = getTransactionChainId(transaction) ?? chainId;
     const connectorChainId = await connector?.getChainId();
-    if (connectorChainId !== chainId || !isSupportedChain(connectorChainId)) {
+    if (connectorChainId !== transactionChainId || !hasMarketplace(connectorChainId)) {
       setError({
         title: "Wallet is on the wrong network",
-        message: "Your wallet is not actually on the selected testnet yet. Switch MetaMask to Sepolia or Polygon Amoy, then refresh and try again.",
+        message: `Your wallet is not actually on the order's chain yet. Switch MetaMask to chain ${transactionChainId}, then refresh and try again.`,
         tone: "warning",
         category: "wrong-network"
       });
@@ -81,7 +83,7 @@ export function TxPanel({ label, description, disabled, disabledReason, buildTra
     }
 
     try {
-      const nextHash = await writeContractAsync(withChainId(buildTransaction(), chainId) as never);
+      const nextHash = await writeContractAsync(withChainId(transaction, transactionChainId) as never);
       setHash(nextHash);
     } catch (caught) {
       setError(decodeDappError(caught));
@@ -144,4 +146,13 @@ function withChainId(transaction: unknown, chainId: number) {
   }
 
   return { ...transaction, chainId };
+}
+
+function getTransactionChainId(transaction: unknown) {
+  if (typeof transaction !== "object" || transaction === null || !("chainId" in transaction)) {
+    return undefined;
+  }
+
+  const chainId = (transaction as { chainId?: unknown }).chainId;
+  return typeof chainId === "number" ? chainId : undefined;
 }

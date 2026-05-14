@@ -9,7 +9,7 @@ import { useAccount, useChainId } from "wagmi";
 import { NewOrderBadge } from "@/components/seller/NewOrderBadge";
 import { WalletButton } from "@/components/WalletButton";
 import { fetchSellerOrders } from "@/lib/api/seller";
-import { isSupportedChain } from "@/lib/contracts";
+import { hasMarketplace } from "@/lib/contracts";
 
 const navItems = [
   { href: "/", label: "Home" },
@@ -29,7 +29,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
   const sellerBadgeQuery = useQuery({
     queryKey: ["seller", "orders", seller, chainId, "Paid", "nav"],
     queryFn: () => fetchSellerOrders({ seller: seller ?? "", chainId, status: "Paid", limit: 100 }),
-    enabled: isConnected && seller !== undefined && isSupportedChain(chainId),
+    enabled: isConnected && seller !== undefined && hasMarketplace(chainId),
     refetchInterval: 15_000
   });
   const sellerBadgeCount = sellerBadgeQuery.data?.orders.length ?? 0;

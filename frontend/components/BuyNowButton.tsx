@@ -7,7 +7,7 @@ import { useAccount, useChainId } from "wagmi";
 import { parseEther } from "viem";
 
 import { getExplorerTxUrl, getFaucetUrl } from "@/lib/chains";
-import { isSupportedChain } from "@/lib/contracts";
+import { hasMarketplace } from "@/lib/contracts";
 import { useOptimisticOrder } from "@/lib/useOptimisticOrder";
 import { useBuyNow } from "@/lib/useBuyNow";
 import { Toast } from "@/components/Toast";
@@ -45,9 +45,9 @@ export function BuyNowButton({
   const txUrl = getExplorerTxUrl(chainId, hash);
   const faucetUrl = getFaucetUrl(chainId);
   const effectiveWalletChainId = connectorChainId ?? chainId;
-  const unsupported = isConnected && (!isSupportedChain(effectiveWalletChainId) || effectiveWalletChainId !== chainId);
+  const unsupported = isConnected && (!hasMarketplace(effectiveWalletChainId) || effectiveWalletChainId !== chainId);
   const disabled = externallyDisabled || unsupported || state.kind === "waitingSignature" || state.kind === "submitted";
-  const effectiveDisabledReason = unsupported ? "Switch to Sepolia or Polygon Amoy before buying." : disabledReason;
+  const effectiveDisabledReason = unsupported ? "Switch to a supported chain before buying." : disabledReason;
   const errorTone =
     state.kind === "failed"
       ? state.error.tone === "danger"
@@ -108,7 +108,7 @@ export function BuyNowButton({
         aria-label={`Buy ${productName}`}
         className="mt-4 inline-flex w-full justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
       >
-        {unsupported ? "Switch to Sepolia or Amoy" : buttonLabel(state.kind, priceEth)}
+        {unsupported ? "Switch to supported chain" : buttonLabel(state.kind, priceEth)}
       </button>
       {(externallyDisabled || unsupported) && effectiveDisabledReason ? <p className="text-sm text-slate-500">{effectiveDisabledReason}</p> : null}
 

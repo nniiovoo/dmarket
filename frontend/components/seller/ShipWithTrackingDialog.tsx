@@ -8,7 +8,7 @@ import { useAccount, useChainId, useSignMessage, useWaitForTransactionReceipt, u
 import { CarrierBadge } from "@/components/CarrierBadge";
 import { CARRIERS, detectCarrier, type CarrierCode } from "@/lib/carriers";
 import { updateShipping } from "@/lib/api/shipping";
-import { escrowMarketplaceV2Abi, getContractAddresses, isSupportedChain } from "@/lib/contracts";
+import { getActiveMarketplace, hasMarketplace } from "@/lib/contracts";
 import { decodeDappError } from "@/lib/errors";
 import type { ApiOrder } from "@/lib/orders";
 
@@ -24,9 +24,9 @@ export function ShipWithTrackingDialog({
   const queryClient = useQueryClient();
   const currentChainId = useChainId();
   const { connector } = useAccount();
-  const contracts = getContractAddresses(order.chainId);
+  const active = getActiveMarketplace(order.chainId);
   const onOrderChain = currentChainId === order.chainId;
-  const canSendOnCurrentChain = isSupportedChain(currentChainId) && onOrderChain;
+  const canSendOnCurrentChain = hasMarketplace(currentChainId) && onOrderChain;
   const { writeContractAsync, isPending: walletPending } = useWriteContract();
   const { signMessageAsync } = useSignMessage();
   const [trackingNumber, setTrackingNumber] = useState("");
@@ -130,9 +130,9 @@ export function ShipWithTrackingDialog({
   }, [hash, hasShippingDetails, order.chainId, queryClient, receipt.isSuccess, saveShippingDetails, sellerAddress]);
 
   async function submit() {
-    if (validation || !contracts?.marketplace || !canSendOnCurrentChain) {
+    if (validation || !active || !canSendOnCurrentChain) {
       if (!canSendOnCurrentChain) {
-        setError("Switch to the order's testnet before confirming shipment.");
+        setError("Switch to the order's chain before confirming shipment.");
       }
       return;
     }
@@ -147,14 +147,14 @@ export function ShipWithTrackingDialog({
 
     try {
       const connectorChainId = await connector?.getChainId();
-      if (connectorChainId !== order.chainId || !isSupportedChain(connectorChainId)) {
-        setError("Your wallet is not actually on this order's testnet yet. Switch MetaMask to the correct testnet, then refresh and try again.");
+      if (connectorChainId !== order.chainId || !hasMarketplace(connectorChainId)) {
+        setError("Your wallet is not actually on this order's chain yet. Switch MetaMask to the correct chain, then refresh and try again.");
         return;
       }
 
       const nextHash = await writeContractAsync({
-        address: contracts.marketplace,
-        abi: escrowMarketplaceV2Abi,
+        address: active.address,
+        abi: active.abi,
         chainId: order.chainId,
         functionName: "markShipped",
         args: [BigInt(order.onChainOrderId)]
@@ -214,7 +214,7 @@ export function ShipWithTrackingDialog({
           </p>
           {validation ? <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{validation}</p> : null}
           {!canSendOnCurrentChain ? (
-            <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">Switch to this order&apos;s testnet before sending the shipment transaction.</p>
+            <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">Switch to this order&apos;s chain before sending the shipment transaction.</p>
           ) : null}
           {error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
           {success ? <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{success}</p> : null}
@@ -230,7 +230,7 @@ export function ShipWithTrackingDialog({
             <button
               type="button"
               onClick={() => void submit()}
-              disabled={busy || validation !== undefined || !contracts?.marketplace || !canSendOnCurrentChain || Boolean(success)}
+              disabled={busy || validation !== undefined || !active || !canSendOnCurrentChain || Boolean(success)}
               className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               {buttonLabel({ walletPending, receiptPending, shippingPhase, chainConfirmed, hasShippingDetails })}

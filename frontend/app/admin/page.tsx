@@ -8,7 +8,7 @@ import { Card, EmptyState, SkeletonLine } from "@/components/Card";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { OrderBadge } from "@/components/OrderBadge";
 import { TxPanel } from "@/components/TxPanel";
-import { escrowMarketplaceV2Abi, getContractAddresses, isSupportedChain } from "@/lib/contracts";
+import { getActiveMarketplace, hasMarketplace } from "@/lib/contracts";
 import { formatAmount, normalizeOrder, OrderStatus, sameAddress } from "@/lib/order";
 
 const refetchInterval = 12_000;
@@ -16,21 +16,21 @@ const refetchInterval = 12_000;
 export default function AdminPage() {
   const chainId = useChainId();
   const { address, isConnected } = useAccount();
-  const contracts = getContractAddresses(chainId);
-  const supported = isSupportedChain(chainId);
+  const active = getActiveMarketplace(chainId);
+  const supported = hasMarketplace(chainId);
   const [orderIdInput, setOrderIdInput] = useState("");
   const orderId = useMemo(() => parseOrderId(orderIdInput), [orderIdInput]);
 
   const ownerQuery = useReadContract({
-    address: contracts?.marketplace,
-    abi: escrowMarketplaceV2Abi,
+    address: active?.address,
+    abi: active?.abi,
     functionName: "owner",
     query: { enabled: supported, refetchInterval }
   });
 
   const orderQuery = useReadContract({
-    address: contracts?.marketplace,
-    abi: escrowMarketplaceV2Abi,
+    address: active?.address,
+    abi: active?.abi,
     functionName: "getOrder",
     args: orderId === undefined ? undefined : [orderId],
     query: { enabled: supported && orderId !== undefined, retry: false, refetchInterval }
@@ -57,7 +57,7 @@ export default function AdminPage() {
         {!isConnected ? (
           <EmptyState title="Connect wallet" body="Connect the owner wallet to use admin actions." />
         ) : !supported ? (
-          <EmptyState title="Unsupported network" body="Switch to Sepolia or Polygon Amoy." />
+          <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia." />
         ) : ownerQuery.isLoading ? (
           <SkeletonLine className="w-1/2" />
         ) : (
@@ -117,8 +117,8 @@ export default function AdminPage() {
               disabledReason={!isOwner ? "Only owner can resolve disputes." : "Order must be Disputed."}
               onConfirmed={refetchAll}
               buildTransaction={() => ({
-                address: contracts?.marketplace,
-                abi: escrowMarketplaceV2Abi,
+                address: active?.address,
+                abi: active?.abi,
                 functionName: "resolveDispute",
                 args: [orderId, true]
               })}
@@ -130,8 +130,8 @@ export default function AdminPage() {
               disabledReason={!isOwner ? "Only owner can resolve disputes." : "Order must be Disputed."}
               onConfirmed={refetchAll}
               buildTransaction={() => ({
-                address: contracts?.marketplace,
-                abi: escrowMarketplaceV2Abi,
+                address: active?.address,
+                abi: active?.abi,
                 functionName: "resolveDispute",
                 args: [orderId, false]
               })}
@@ -143,8 +143,8 @@ export default function AdminPage() {
               disabledReason={!isOwner ? "Only owner can emergency refund." : "Order must have escrowed funds."}
               onConfirmed={refetchAll}
               buildTransaction={() => ({
-                address: contracts?.marketplace,
-                abi: escrowMarketplaceV2Abi,
+                address: active?.address,
+                abi: active?.abi,
                 functionName: "ownerEmergencyRefund",
                 args: [orderId]
               })}
