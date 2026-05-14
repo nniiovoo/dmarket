@@ -5,7 +5,7 @@ import { parseEther } from "viem";
 import type { Hash } from "viem";
 import { useAccount, useChainId, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 
-import { escrowMarketplaceV2Abi, getContractAddresses, isSupportedChain } from "@/lib/contracts";
+import { getActiveMarketplace, hasMarketplace } from "@/lib/contracts";
 import { decodeDappError, type DappError } from "@/lib/errors";
 import { findCreatedOrderId } from "@/lib/orderEvents";
 
@@ -19,8 +19,8 @@ export type BuyNowState =
 export function useBuyNow() {
   const chainId = useChainId();
   const { address, connector } = useAccount();
-  const contracts = getContractAddresses(chainId);
-  const supported = isSupportedChain(chainId);
+  const active = getActiveMarketplace(chainId);
+  const supported = hasMarketplace(chainId);
   const { writeContractAsync } = useWriteContract();
   const [state, setState] = useState<BuyNowState>({ kind: "idle" });
   const handledReceipt = useRef<Hash | undefined>(undefined);
@@ -73,12 +73,12 @@ export function useBuyNow() {
   }, [receipt.isError, submittedHash]);
 
   async function buyNow(args: { seller: string; productId: bigint; priceEth: string }) {
-    if (!supported || contracts === undefined) {
+    if (!supported || active === undefined) {
       setState({
         kind: "failed",
         error: {
           title: "Unsupported network",
-          message: "Switch to Sepolia or Polygon Amoy.",
+          message: "Switch to a supported chain.",
           tone: "warning",
           category: "wrong-network"
         }
@@ -100,12 +100,12 @@ export function useBuyNow() {
     }
 
     const connectorChainId = await connector?.getChainId();
-    if (connectorChainId !== chainId || !isSupportedChain(connectorChainId)) {
+    if (connectorChainId !== chainId || !hasMarketplace(connectorChainId)) {
       setState({
         kind: "failed",
         error: {
           title: "Wallet is on the wrong network",
-          message: "Your wallet is not actually on the selected testnet yet. Switch MetaMask to Sepolia or Polygon Amoy, then refresh and try again.",
+          message: "Your wallet is not actually on the selected testnet yet. Switch MetaMask to a supported chain, then refresh and try again.",
           tone: "warning",
           category: "wrong-network"
         }
@@ -118,8 +118,8 @@ export function useBuyNow() {
 
     try {
       const hash = await writeContractAsync({
-        address: contracts.marketplace,
-        abi: escrowMarketplaceV2Abi,
+        address: active.address,
+        abi: active.abi,
         chainId,
         functionName: "createAndPay",
         args: [args.seller, args.productId],
