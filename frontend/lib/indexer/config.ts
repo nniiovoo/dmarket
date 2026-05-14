@@ -26,9 +26,13 @@ export const INDEXED_CHAIN_IDS = ALL_CANDIDATE_CHAINS.filter(chainHasV3Configure
 export const DEPLOYMENT_BLOCK: Record<number, bigint> = {
   [sepolia.id]: 10835467n,
   [polygonAmoy.id]: 38206485n,
-  // V3 marketplace deploy tx is around 268217354; start slightly before it
-  // so catch-up sees the first lifecycle events without scanning genesis.
-  [arbitrumSepolia.id]: 268217000n
+  // V3 marketplace deploy tx is around 268217354. Free-tier Alchemy on
+  // Arbitrum Sepolia caps eth_getLogs to ~10 blocks, so a full backfill
+  // from deploy would mean 60k+ single-block RPC calls. Use env override
+  // INDEXER_ARBSEPOLIA_FROM_BLOCK to jump forward (e.g. set to current tip
+  // when starting indexer fresh). Default below covers from-deploy in case
+  // a paid RPC is used.
+  [arbitrumSepolia.id]: readPositiveBigIntEnv("INDEXER_ARBSEPOLIA_FROM_BLOCK", 268217000n)
 };
 
 export const INDEXER_CHUNK_SIZE_BLOCKS = readPositiveBigIntEnv("INDEXER_CHUNK_SIZE_BLOCKS", 5000n);
