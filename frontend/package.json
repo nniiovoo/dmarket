@@ -18,6 +18,7 @@
     "sync-abi": "cd .. && npm run sync-abi"
   },
   "dependencies": {
+    "@lifi/sdk": "^3.16.3",
     "@prisma/client": "^6.19.0",
     "@rainbow-me/rainbowkit": "^2.2.11",
     "@tanstack/react-query": "^5.100.9",
