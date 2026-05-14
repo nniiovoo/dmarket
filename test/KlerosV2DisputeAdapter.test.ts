@@ -431,4 +431,65 @@ describe("KlerosV2DisputeAdapter", function () {
       expect(balAfter - balBefore).to.equal(ethers.parseEther("0.05"));
     });
   });
+
+  describe("executeOnMarketplace (pass-through)", function () {
+    it("only owner can call", async function () {
+      const ctx = await deploy();
+      const { adapter, other, marketplace } = ctx;
+      const data = marketplace.interface.encodeFunctionData("pause");
+      await expect(adapter.connect(other).executeOnMarketplace(data))
+        .to.be.revertedWithCustomError(adapter, "OwnableUnauthorizedAccount");
+    });
+
+    it("owner can pause marketplace through adapter after ownership transfer", async function () {
+      const ctx = await deploy();
+      const { ethers, owner, adapter, marketplace } = ctx;
+
+      // Sanity: marketplace owner is now adapter
+      expect(await marketplace.owner()).to.equal(await adapter.getAddress());
+      expect(await marketplace.paused()).to.equal(false);
+
+      const pauseData = marketplace.interface.encodeFunctionData("pause");
+      await adapter.connect(owner).executeOnMarketplace(pauseData);
+
+      expect(await marketplace.paused()).to.equal(true);
+
+      const unpauseData = marketplace.interface.encodeFunctionData("unpause");
+      await adapter.connect(owner).executeOnMarketplace(unpauseData);
+
+      expect(await marketplace.paused()).to.equal(false);
+    });
+
+    it("owner can update Chainlink config through adapter (setSubscriptionId)", async function () {
+      const ctx = await deploy();
+      const { owner, adapter, marketplace } = ctx;
+
+      const data = marketplace.interface.encodeFunctionData("setSubscriptionId", [42n]);
+      await adapter.connect(owner).executeOnMarketplace(data);
+
+      expect(await marketplace.subscriptionId()).to.equal(42n);
+    });
+
+    it("bubbles up marketplace revert reason", async function () {
+      const ctx = await deploy();
+      const { owner, adapter, marketplace } = ctx;
+
+      // setCallbackGasLimit reverts on zero
+      const data = marketplace.interface.encodeFunctionData("setCallbackGasLimit", [0]);
+      await expect(adapter.connect(owner).executeOnMarketplace(data)).to.be.revertedWith(
+        "Callback gas limit cannot be zero"
+      );
+    });
+
+    it("emits MarketplaceCallExecuted with selector", async function () {
+      const ctx = await deploy();
+      const { owner, adapter, marketplace } = ctx;
+
+      const data = marketplace.interface.encodeFunctionData("setSubscriptionId", [99n]);
+      const selector = data.slice(0, 10); // 0x + 4 bytes
+      await expect(adapter.connect(owner).executeOnMarketplace(data))
+        .to.emit(adapter, "MarketplaceCallExecuted")
+        .withArgs(selector, 0n);
+    });
+  });
 });

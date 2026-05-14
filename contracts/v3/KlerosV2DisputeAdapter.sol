@@ -177,4 +177,33 @@ contract KlerosV2DisputeAdapter is Ownable2Step, IArbitrableV2 {
     function acceptMarketplaceOwnership() external onlyOwner {
         marketplace.acceptOwnership();
     }
+
+    /// Generic pass-through so the adapter owner (multisig in production)
+    /// can still invoke the marketplace's other owner-only functions —
+    /// setSubscriptionId, pause/unpause, proposeRequestSource,
+    /// setEvidenceRegistry, etc. — after ownership has been transferred to
+    /// the adapter. Without this, transferring ownership would brick every
+    /// owner function on the marketplace except resolveDispute, which we
+    /// route through escalateToKleros / emergencyResolveDispute.
+    ///
+    /// The adapter owner is fully trusted (it's the same multisig that
+    /// would have been the direct marketplace owner), so granting it
+    /// arbitrary proxy authority does not expand the trust surface.
+    event MarketplaceCallExecuted(bytes4 indexed selector, uint256 valueSent);
+    error MarketplaceCallFailed(bytes returndata);
+
+    function executeOnMarketplace(bytes calldata data) external payable onlyOwner returns (bytes memory) {
+        (bool ok, bytes memory ret) = address(marketplace).call{value: msg.value}(data);
+        if (!ok) {
+            if (ret.length > 0) {
+                assembly {
+                    revert(add(32, ret), mload(ret))
+                }
+            }
+            revert MarketplaceCallFailed(ret);
+        }
+        bytes4 selector = data.length >= 4 ? bytes4(data[:4]) : bytes4(0);
+        emit MarketplaceCallExecuted(selector, msg.value);
+        return ret;
+    }
 }
