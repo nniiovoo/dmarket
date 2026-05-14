@@ -5,7 +5,8 @@ import { parseEther } from "viem";
 import type { Hash } from "viem";
 import { useAccount, useChainId, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 
-import { getActiveMarketplace, hasMarketplace } from "@/lib/contracts";
+import { PRIMARY_CHAIN_ID } from "@/lib/chains";
+import { getActiveMarketplace } from "@/lib/contracts";
 import { decodeDappError, type DappError } from "@/lib/errors";
 import { findCreatedOrderId } from "@/lib/orderEvents";
 
@@ -19,8 +20,8 @@ export type BuyNowState =
 export function useBuyNow() {
   const chainId = useChainId();
   const { address, connector } = useAccount();
-  const active = getActiveMarketplace(chainId);
-  const supported = hasMarketplace(chainId);
+  const active = getActiveMarketplace(PRIMARY_CHAIN_ID);
+  const supported = active !== undefined;
   const { writeContractAsync } = useWriteContract();
   const [state, setState] = useState<BuyNowState>({ kind: "idle" });
   const handledReceipt = useRef<Hash | undefined>(undefined);
@@ -100,12 +101,12 @@ export function useBuyNow() {
     }
 
     const connectorChainId = await connector?.getChainId();
-    if (connectorChainId !== chainId || !hasMarketplace(connectorChainId)) {
+    if (connectorChainId !== PRIMARY_CHAIN_ID) {
       setState({
         kind: "failed",
         error: {
           title: "Wallet is on the wrong network",
-          message: "Your wallet is not actually on the selected testnet yet. Switch MetaMask to a supported chain, then refresh and try again.",
+          message: "Your wallet is not on Arbitrum Sepolia yet. Switch MetaMask to Arbitrum Sepolia, then refresh and try again.",
           tone: "warning",
           category: "wrong-network"
         }
@@ -120,7 +121,7 @@ export function useBuyNow() {
       const hash = await writeContractAsync({
         address: active.address,
         abi: active.abi,
-        chainId,
+        chainId: PRIMARY_CHAIN_ID,
         functionName: "createAndPay",
         args: [args.seller, args.productId],
         value: parseEther(args.priceEth)

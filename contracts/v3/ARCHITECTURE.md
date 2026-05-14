@@ -196,3 +196,19 @@ The frontend auto-adapts to the connected wallet's chain:
 Users can switch chains via the wallet connector and see the appropriate
 marketplace for that chain. Same order ID can exist on multiple chains
 (each chain has its own orderId space).
+
+## Production chain strategy
+
+ChainUs's production deployment target is **Arbitrum One** (mainnet) with
+the same architecture as Arbitrum Sepolia (testnet today). Reasons:
+- Kleros V2 court lives on Arbitrum (not on Ethereum mainnet)
+- Gas is ~100x cheaper than Ethereum, making consumer-grade pricing viable
+- Chainlink Functions is available
+
+The frontend locks to PRIMARY_CHAIN_ID (currently arbitrumSepolia, will
+flip to arbitrum mainnet on launch). V2 deployments on Sepolia / Amoy are
+historical dev artifacts, accessible only via the /legacy page.
+
+Cross-chain payment is planned (Stage 2 / 3 of the launch plan): users on
+any EVM chain will be able to pay via Across Protocol — funds bridge to
+Arbitrum and escrow normally. Marketplace state always lives on Arbitrum.

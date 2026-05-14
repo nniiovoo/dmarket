@@ -5,68 +5,57 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { formatEther } from "viem";
-import { useAccount, useBalance, useChainId, useReadContract } from "wagmi";
+import { useAccount, useBalance, useReadContract } from "wagmi";
 
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { OrderCard } from "@/components/OrderCard";
 import { fetchOrders } from "@/lib/api/orders";
-import { explorerByChainId, getExplorerAddressUrl, getFaucetUrl } from "@/lib/chains";
-import { getActiveMarketplace, hasMarketplace } from "@/lib/contracts";
+import { PRIMARY_CHAIN, PRIMARY_CHAIN_ID, explorerByChainId, getExplorerAddressUrl, getFaucetUrl } from "@/lib/chains";
+import { getActiveMarketplace } from "@/lib/contracts";
 import { useOptimisticOrder, type PendingOrder } from "@/lib/useOptimisticOrder";
 
 const refetchInterval = 12_000;
 
 export default function HomePage() {
   const router = useRouter();
-  const chainId = useChainId();
   const { address, isConnected } = useAccount();
   const [manualOrderId, setManualOrderId] = useState("");
   const optimistic = useOptimisticOrder();
-  const active = getActiveMarketplace(chainId);
-  const supported = hasMarketplace(chainId);
-  const heroTitle =
-    active?.version === "v3" ? "Escrow Marketplace v3" : active?.version === "v2" ? "Escrow Marketplace v2" : "Escrow Marketplace";
-  const heroSubtitle =
-    active?.version === "v3"
-      ? "v3 with Kleros V2 decentralized arbitration on Arbitrum Sepolia."
-      : active?.version === "v2"
-        ? "Create orders, escrow funds in the vault, ship, confirm receipt, and handle disputes on Sepolia or Polygon Amoy."
-        : "Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia to interact with the marketplace.";
-  const networkStatus =
-    active?.version === "v3"
-      ? "Connected: Arbitrum Sepolia (v3 + Kleros)"
-      : active?.version === "v2"
-        ? `Connected: ${chainId === 11155111 ? "Sepolia" : "Polygon Amoy"} (v2)`
-        : undefined;
-  const balance = useBalance({ address, query: { enabled: address !== undefined } });
+  const active = getActiveMarketplace(PRIMARY_CHAIN_ID);
+  const supported = active !== undefined;
+  const heroTitle = "Escrow Marketplace v3";
+  const heroSubtitle = "ChainUs runs on Arbitrum with Kleros V2 decentralized arbitration.";
+  const networkStatus = `${PRIMARY_CHAIN.name} (testnet)`;
+  const balance = useBalance({ address, chainId: PRIMARY_CHAIN_ID, query: { enabled: address !== undefined } });
 
   const nextOrderId = useReadContract({
     address: active?.address,
     abi: active?.abi,
+    chainId: PRIMARY_CHAIN_ID,
     functionName: "nextOrderId",
     query: { enabled: supported, refetchInterval }
   });
 
   const buyerOrdersQuery = useQuery({
-    queryKey: ["orders", "buyer", address, chainId],
-    queryFn: () => fetchOrders({ buyer: address, chainId }),
+    queryKey: ["orders", "buyer", address, PRIMARY_CHAIN_ID],
+    queryFn: () => fetchOrders({ buyer: address, chainId: PRIMARY_CHAIN_ID }),
     enabled: supported && address !== undefined,
     refetchInterval
   });
 
   const sellerOrdersQuery = useQuery({
-    queryKey: ["orders", "seller", address, chainId],
-    queryFn: () => fetchOrders({ seller: address, chainId }),
+    queryKey: ["orders", "seller", address, PRIMARY_CHAIN_ID],
+    queryFn: () => fetchOrders({ seller: address, chainId: PRIMARY_CHAIN_ID }),
     enabled: supported && address !== undefined,
     refetchInterval
   });
   const buyerPendingOrders = useMemo(
     () =>
       optimistic.pendingOrders.filter(
-        (order) => order.chainId === chainId && address !== undefined && order.buyer === address.toLowerCase()
+        (order) => order.chainId === PRIMARY_CHAIN_ID && address !== undefined && order.buyer === address.toLowerCase()
       ),
-    [address, chainId, optimistic.pendingOrders]
+    [address, optimistic.pendingOrders]
   );
 
   useEffect(() => {
@@ -121,17 +110,17 @@ export default function HomePage() {
           {!isConnected ? (
             <EmptyState title="Connect wallet" body="Connect a wallet to read your buyer and seller orders." />
           ) : !supported ? (
-            <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia." />
+            <EmptyState title="Configuration missing" body="Arbitrum marketplace addresses are not configured." />
           ) : (
             <div className="space-y-3 text-sm">
               <InfoRow label="Status" value={networkStatus} />
-              <InfoRow label="Chain ID" value={String(chainId)} />
+              <InfoRow label="Chain ID" value={String(PRIMARY_CHAIN_ID)} />
               <InfoRow
                 label="Marketplace"
                 value={active?.address}
-                href={getExplorerAddressUrl(chainId, active?.address)}
+                href={getExplorerAddressUrl(PRIMARY_CHAIN_ID, active?.address)}
               />
-              <InfoRow label="Vault" value={active?.vault} href={getExplorerAddressUrl(chainId, active?.vault)} />
+              <InfoRow label="Vault" value={active?.vault} href={getExplorerAddressUrl(PRIMARY_CHAIN_ID, active?.vault)} />
               <InfoRow
                 label="Next order ID"
                 value={nextOrderId.isLoading ? undefined : String((nextOrderId.data as bigint | undefined) ?? "-")}
@@ -143,15 +132,15 @@ export default function HomePage() {
               {balance.data?.value === 0n ? (
                 <a
                   className="inline-block text-blue-700 underline"
-                  href={getFaucetUrl(chainId)}
+                  href={getFaucetUrl(PRIMARY_CHAIN_ID)}
                   target="_blank"
                   rel="noreferrer"
                 >
                   Open faucet
                 </a>
               ) : null}
-              {explorerByChainId[chainId] ? (
-                <p className="text-xs text-slate-500">Explorer: {explorerByChainId[chainId]}</p>
+              {explorerByChainId[PRIMARY_CHAIN_ID] ? (
+                <p className="text-xs text-slate-500">Explorer: {explorerByChainId[PRIMARY_CHAIN_ID]}</p>
               ) : null}
             </div>
           )}

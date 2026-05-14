@@ -1,6 +1,19 @@
 import { arbitrumSepolia, polygonAmoy, sepolia } from "wagmi/chains";
 
-export const supportedChains = [sepolia, polygonAmoy, arbitrumSepolia] as const;
+export const PRIMARY_CHAIN = arbitrumSepolia;
+export const PRIMARY_CHAIN_ID = arbitrumSepolia.id;
+
+export const supportedChains = [arbitrumSepolia, sepolia, polygonAmoy] as const;
+
+export const LEGACY_CHAIN_IDS: number[] = [sepolia.id, polygonAmoy.id];
+
+export function isLegacyChain(chainId: number | undefined): boolean {
+  return chainId !== undefined && LEGACY_CHAIN_IDS.includes(chainId);
+}
+
+export function isPrimaryChain(chainId: number | undefined): boolean {
+  return chainId === PRIMARY_CHAIN_ID;
+}
 
 export const explorerByChainId: Record<number, string> = {
   [sepolia.id]: "https://sepolia.etherscan.io",

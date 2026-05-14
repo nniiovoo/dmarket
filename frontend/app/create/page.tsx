@@ -3,12 +3,13 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { isAddress, parseEther, zeroAddress } from "viem";
-import { useAccount, useChainId } from "wagmi";
+import { useAccount } from "wagmi";
 
 import { BuyNowButton } from "@/components/BuyNowButton";
 import { Card, EmptyState } from "@/components/Card";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { TxPanel } from "@/components/TxPanel";
+import { PRIMARY_CHAIN_ID } from "@/lib/chains";
 import { getActiveMarketplace, hasMarketplace } from "@/lib/contracts";
 
 export default function CreateOrderPage() {
@@ -51,10 +52,9 @@ function CreateOrderForm({
   initialAmount: string;
   productName: string | null;
 }) {
-  const chainId = useChainId();
   const { address, isConnected } = useAccount();
-  const active = getActiveMarketplace(chainId);
-  const supported = hasMarketplace(chainId);
+  const active = getActiveMarketplace(PRIMARY_CHAIN_ID);
+  const supported = hasMarketplace(PRIMARY_CHAIN_ID);
   const [seller, setSeller] = useState(initialSeller);
   const [productId, setProductId] = useState(initialProductId);
   const [amount, setAmount] = useState(initialAmount);
@@ -98,6 +98,7 @@ function CreateOrderForm({
                 buildTransaction={() => ({
                   address: active?.address,
                   abi: active?.abi,
+                  chainId: PRIMARY_CHAIN_ID,
                   functionName: "createOrder",
                   args: [seller, BigInt(productId), parseEther(amount)]
                 })}

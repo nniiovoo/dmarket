@@ -4,12 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useAccount, useChainId } from "wagmi";
+import { useAccount } from "wagmi";
 
 import { NewOrderBadge } from "@/components/seller/NewOrderBadge";
 import { WalletButton } from "@/components/WalletButton";
 import { fetchSellerOrders } from "@/lib/api/seller";
+import { PRIMARY_CHAIN_ID } from "@/lib/chains";
 import { hasMarketplace } from "@/lib/contracts";
+import { usePromptPrimaryChain } from "@/lib/usePromptPrimaryChain";
 
 const navItems = [
   { href: "/", label: "Home" },
@@ -18,18 +20,20 @@ const navItems = [
   { href: "/seller", label: "Seller Dashboard" },
   { href: "/settings", label: "Settings" },
   { href: "/seller/new", label: "Sell" },
-  { href: "/admin", label: "Admin" }
+  { href: "/admin", label: "Admin" },
+  { href: "/legacy", label: "Legacy" }
 ];
 
 export function AppFrame({ children }: { children: ReactNode }) {
+  usePromptPrimaryChain();
+
   const pathname = usePathname();
-  const chainId = useChainId();
   const { address, isConnected } = useAccount();
   const seller = address?.toLowerCase();
   const sellerBadgeQuery = useQuery({
-    queryKey: ["seller", "orders", seller, chainId, "Paid", "nav"],
-    queryFn: () => fetchSellerOrders({ seller: seller ?? "", chainId, status: "Paid", limit: 100 }),
-    enabled: isConnected && seller !== undefined && hasMarketplace(chainId),
+    queryKey: ["seller", "orders", seller, PRIMARY_CHAIN_ID, "Paid", "nav"],
+    queryFn: () => fetchSellerOrders({ seller: seller ?? "", chainId: PRIMARY_CHAIN_ID, status: "Paid", limit: 100 }),
+    enabled: isConnected && seller !== undefined && hasMarketplace(PRIMARY_CHAIN_ID),
     refetchInterval: 15_000
   });
   const sellerBadgeCount = sellerBadgeQuery.data?.orders.length ?? 0;
@@ -42,9 +46,9 @@ export function AppFrame({ children }: { children: ReactNode }) {
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <Link href="/" className="text-lg font-semibold text-slate-950">
-              Escrow Marketplace
+              ChainUs
             </Link>
-            <p className="text-sm text-slate-500">v2 testnet dApp</p>
+            <p className="text-sm text-slate-500">Arbitrum escrow marketplace</p>
           </div>
           <nav className="flex flex-wrap items-center gap-2">
             {visibleNavItems.map((item) => (

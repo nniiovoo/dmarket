@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useAccount, useChainId } from "wagmi";
+import { useAccount } from "wagmi";
 
 import { Card, EmptyState } from "@/components/Card";
 import { NetworkNotice } from "@/components/NetworkNotice";
@@ -11,21 +11,20 @@ import { AllOrdersList } from "@/components/seller/AllOrdersList";
 import { MyProductsList } from "@/components/seller/MyProductsList";
 import { PendingOrdersList } from "@/components/seller/PendingOrdersList";
 import { SellerTabs, type SellerTab } from "@/components/seller/SellerTabs";
-import { supportedChains } from "@/lib/chains";
+import { PRIMARY_CHAIN, PRIMARY_CHAIN_ID } from "@/lib/chains";
 import { fetchSellerOrders } from "@/lib/api/seller";
 import { hasMarketplace } from "@/lib/contracts";
 
 export default function SellerDashboardPage() {
-  const chainId = useChainId();
   const { address, isConnected } = useAccount();
   const [activeTab, setActiveTab] = useState<SellerTab>("pending");
-  const supported = hasMarketplace(chainId);
-  const chainName = supportedChains.find((chain) => chain.id === chainId)?.name ?? `Chain ${chainId}`;
+  const supported = hasMarketplace(PRIMARY_CHAIN_ID);
+  const chainName = PRIMARY_CHAIN.name;
   const seller = address?.toLowerCase();
   const enabled = isConnected && supported && seller !== undefined;
   const pendingQuery = useQuery({
-    queryKey: ["seller", "orders", seller, chainId, "Paid", "count"],
-    queryFn: () => fetchSellerOrders({ seller: seller ?? "", chainId, status: "Paid", limit: 100 }),
+    queryKey: ["seller", "orders", seller, PRIMARY_CHAIN_ID, "Paid", "count"],
+    queryFn: () => fetchSellerOrders({ seller: seller ?? "", chainId: PRIMARY_CHAIN_ID, status: "Paid", limit: 100 }),
     enabled,
     refetchInterval: 15_000
   });
@@ -54,9 +53,9 @@ export default function SellerDashboardPage() {
         ) : (
           <div className="space-y-5">
             <SellerTabs activeTab={activeTab} pendingCount={pendingCount} onChange={setActiveTab} />
-            {activeTab === "pending" ? <PendingOrdersList seller={seller} chainId={chainId} enabled={enabled} /> : null}
-            {activeTab === "products" ? <MyProductsList seller={seller} chainId={chainId} enabled={enabled} /> : null}
-            {activeTab === "orders" ? <AllOrdersList seller={seller} chainId={chainId} enabled={enabled} /> : null}
+            {activeTab === "pending" ? <PendingOrdersList seller={seller} chainId={PRIMARY_CHAIN_ID} enabled={enabled} /> : null}
+            {activeTab === "products" ? <MyProductsList seller={seller} chainId={PRIMARY_CHAIN_ID} enabled={enabled} /> : null}
+            {activeTab === "orders" ? <AllOrdersList seller={seller} chainId={PRIMARY_CHAIN_ID} enabled={enabled} /> : null}
           </div>
         )}
       </Card>

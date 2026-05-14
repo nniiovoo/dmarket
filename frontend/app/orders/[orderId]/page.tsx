@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useAccount, useChainId, useReadContract } from "wagmi";
+import { useAccount, useReadContract } from "wagmi";
 
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
 import { EvidenceSection } from "@/components/evidence/EvidenceSection";
@@ -18,7 +18,7 @@ import { ShipWithTrackingDialog } from "@/components/seller/ShipWithTrackingDial
 import { TrackingLink } from "@/components/TrackingLink";
 import { TxPanel } from "@/components/TxPanel";
 import { fetchOrder } from "@/lib/api/orders";
-import { getExplorerAddressUrl } from "@/lib/chains";
+import { PRIMARY_CHAIN_ID, getExplorerAddressUrl } from "@/lib/chains";
 import { escrowVaultAbi, getActiveMarketplace, hasMarketplace, type ActiveMarketplace } from "@/lib/contracts";
 import { formatAmount, formatTimestamp, normalizeOrder, OrderStatus } from "@/lib/order";
 import { computeActions, getRole, type AvailableAction } from "@/lib/orderPermissions";
@@ -29,17 +29,19 @@ const refetchInterval = 12_000;
 
 export default function OrderDetailPage() {
   const params = useParams<{ orderId: string }>();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const [showShipDialog, setShowShipDialog] = useState(false);
   const orderId = useMemo(() => parseOrderId(params.orderId), [params.orderId]);
-  const chainId = useChainId();
+  const targetChainId = useMemo(() => parseChainId(searchParams.get("chainId")) ?? PRIMARY_CHAIN_ID, [searchParams]);
   const { address, isConnected } = useAccount();
-  const active = getActiveMarketplace(chainId);
-  const supported = hasMarketplace(chainId);
+  const active = getActiveMarketplace(targetChainId);
+  const supported = hasMarketplace(targetChainId);
 
   const orderQuery = useReadContract({
     address: active?.address,
     abi: active?.abi,
+    chainId: targetChainId,
     functionName: "getOrder",
     args: orderId === undefined ? undefined : [orderId],
     query: { enabled: supported && orderId !== undefined, refetchInterval, retry: false }
@@ -48,6 +50,7 @@ export default function OrderDetailPage() {
   const vaultQuery = useReadContract({
     address: active?.vault,
     abi: escrowVaultAbi,
+    chainId: targetChainId,
     functionName: "lockedAmount",
     args: orderId === undefined ? undefined : [orderId],
     query: { enabled: supported && orderId !== undefined, refetchInterval }
@@ -56,13 +59,14 @@ export default function OrderDetailPage() {
   const ownerQuery = useReadContract({
     address: active?.address,
     abi: active?.abi,
+    chainId: targetChainId,
     functionName: "owner",
     query: { enabled: supported, refetchInterval }
   });
 
   const orderApi = useQuery({
-    queryKey: ["order", chainId, orderId?.toString()],
-    queryFn: () => fetchOrder(chainId, orderId?.toString() ?? ""),
+    queryKey: ["order", targetChainId, orderId?.toString()],
+    queryFn: () => fetchOrder(targetChainId, orderId?.toString() ?? ""),
     enabled: supported && orderId !== undefined,
     refetchInterval,
     retry: false
@@ -110,7 +114,7 @@ export default function OrderDetailPage() {
       {!isConnected ? (
         <EmptyState title="Connect wallet" body="Connect a wallet to read and act on this order." />
       ) : !supported ? (
-        <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia." />
+        <EmptyState title="Unsupported network" body="This order chain is not configured in the frontend." />
       ) : orderId === undefined ? (
         <EmptyState title="Invalid order ID" body="Use a positive numeric order ID." />
       ) : orderQuery.isLoading ? (
@@ -149,7 +153,7 @@ export default function OrderDetailPage() {
                     apiOrder={orderApi.data}
                     orderId={orderId}
                     active={active}
-                    chainId={chainId}
+                    chainId={targetChainId}
                     onConfirmed={refetchAll}
                     onOpenShipDialog={() => setShowShipDialog(true)}
                   />
@@ -161,8 +165,8 @@ export default function OrderDetailPage() {
           <ProductSection order={orderApi.data} isLoading={orderApi.isLoading} isSyncing={orderApi.isError} />
           <Card title="Order details" action={<StatusBadge status={order.status} />}>
             <div className="grid gap-3 text-sm md:grid-cols-2">
-              <Info label="Buyer" value={order.buyer} href={getExplorerAddressUrl(chainId, order.buyer)} />
-              <Info label="Seller" value={order.seller} href={getExplorerAddressUrl(chainId, order.seller)} />
+              <Info label="Buyer" value={order.buyer} href={getExplorerAddressUrl(targetChainId, order.buyer)} />
+              <Info label="Seller" value={order.seller} href={getExplorerAddressUrl(targetChainId, order.seller)} />
               <Info label="Product ID" value={order.productId.toString()} />
               <Info label="Amount" value={`${formatAmount(order.amount)} ETH / MATIC`} />
               <Info label="Locked in vault" value={`${formatAmount(lockedAmount)} ETH / MATIC`} />
@@ -177,7 +181,7 @@ export default function OrderDetailPage() {
           {orderApi.data ? <EvidenceSection order={orderApi.data} /> : null}
           {showShipDialog ? (
             <ShipWithTrackingDialog
-              order={toApiOrder(orderApi.data, order, chainId)}
+              order={toApiOrder(orderApi.data, order, targetChainId)}
               sellerAddress={order.seller}
               onClose={() => {
                 setShowShipDialog(false);
@@ -494,4 +498,12 @@ function parseOrderId(value: string | undefined) {
   } catch {
     return undefined;
   }
+}
+
+function parseChainId(value: string | null) {
+  if (value === null) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }

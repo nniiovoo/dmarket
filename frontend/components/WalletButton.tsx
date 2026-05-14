@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useAccount, useChainId, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 
-import { supportedChains } from "@/lib/chains";
+import { PRIMARY_CHAIN, isLegacyChain, supportedChains } from "@/lib/chains";
 import { walletConnectProjectId } from "@/lib/wagmi";
 
 function shortAddress(address: string) {
@@ -34,6 +34,7 @@ export function WalletButton() {
   const { switchChainAsync, isPending: isSwitching } = useSwitchChain();
   const [error, setError] = useState<string | undefined>();
   const [open, setOpen] = useState(false);
+  const [showLegacyChains, setShowLegacyChains] = useState(false);
 
   const metaMaskConnector = useMemo(
     () => connectors.find((connector) => connector.type === "injected") ?? connectors[0],
@@ -44,6 +45,7 @@ export function WalletButton() {
     [connectors]
   );
   const currentChain = supportedChains.find((chain) => chain.id === chainId);
+  const legacyChains = supportedChains.filter((chain) => isLegacyChain(chain.id));
 
   async function connectMetaMask() {
     setError(undefined);
@@ -105,8 +107,8 @@ export function WalletButton() {
           <div className="absolute right-0 z-20 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
             <p className="text-sm font-medium text-slate-950">Wallet connected</p>
             <p className="mt-1 break-all text-xs text-slate-500">{address}</p>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {supportedChains.map((chain) => (
+            <div className="mt-3 grid gap-2">
+              {[PRIMARY_CHAIN].map((chain) => (
                 <button
                   key={chain.id}
                   type="button"
@@ -118,6 +120,28 @@ export function WalletButton() {
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => setShowLegacyChains((value) => !value)}
+              className="mt-3 text-xs font-medium text-slate-500 hover:text-slate-800"
+            >
+              {showLegacyChains ? "Hide legacy chains" : "Show legacy chains"}
+            </button>
+            {showLegacyChains ? (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {legacyChains.map((chain) => (
+                  <button
+                    key={chain.id}
+                    type="button"
+                    onClick={() => switchTo(chain.id)}
+                    disabled={chain.id === chainId || isSwitching}
+                    className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    {chain.name}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={() => disconnect()}

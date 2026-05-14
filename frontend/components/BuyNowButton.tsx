@@ -6,8 +6,7 @@ import { useRouter } from "next/navigation";
 import { useAccount, useChainId } from "wagmi";
 import { parseEther } from "viem";
 
-import { getExplorerTxUrl, getFaucetUrl } from "@/lib/chains";
-import { hasMarketplace } from "@/lib/contracts";
+import { PRIMARY_CHAIN_ID, getExplorerTxUrl, getFaucetUrl } from "@/lib/chains";
 import { useOptimisticOrder } from "@/lib/useOptimisticOrder";
 import { useBuyNow } from "@/lib/useBuyNow";
 import { Toast } from "@/components/Toast";
@@ -42,10 +41,10 @@ export function BuyNowButton({
   const optimistic = useOptimisticOrder();
   const handledConfirmedOrder = useRef<string | undefined>(undefined);
   const hash = state.kind === "submitted" || state.kind === "confirmed" ? state.hash : undefined;
-  const txUrl = getExplorerTxUrl(chainId, hash);
-  const faucetUrl = getFaucetUrl(chainId);
+  const txUrl = getExplorerTxUrl(PRIMARY_CHAIN_ID, hash);
+  const faucetUrl = getFaucetUrl(PRIMARY_CHAIN_ID);
   const effectiveWalletChainId = connectorChainId ?? chainId;
-  const unsupported = isConnected && (!hasMarketplace(effectiveWalletChainId) || effectiveWalletChainId !== chainId);
+  const unsupported = isConnected && effectiveWalletChainId !== PRIMARY_CHAIN_ID;
   const disabled = externallyDisabled || unsupported || state.kind === "waitingSignature" || state.kind === "submitted";
   const effectiveDisabledReason = unsupported ? "Switch to a supported chain before buying." : disabledReason;
   const errorTone =
@@ -67,8 +66,8 @@ export function BuyNowButton({
 
     handledConfirmedOrder.current = orderId;
     const timeout = window.setTimeout(() => {
-      optimistic.addPending({
-        chainId,
+        optimistic.addPending({
+        chainId: PRIMARY_CHAIN_ID,
         onChainOrderId: orderId,
         buyer: address.toLowerCase(),
         seller: seller.toLowerCase(),
@@ -80,7 +79,7 @@ export function BuyNowButton({
     }, 2_000);
 
     return () => window.clearTimeout(timeout);
-  }, [address, chainId, optimistic, priceEth, productId, productImageUrl, productName, productStatus, router, seller, state]);
+  }, [address, optimistic, priceEth, productId, productImageUrl, productName, productStatus, router, seller, state]);
 
   useEffect(() => {
     let cancelled = false;

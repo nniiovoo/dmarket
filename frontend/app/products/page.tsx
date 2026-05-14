@@ -1,20 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { formatEther } from "viem";
-import { useChainId } from "wagmi";
 
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { fetchProducts, type Product } from "@/lib/api/products";
 import { hasMarketplace } from "@/lib/contracts";
-import { supportedChains } from "@/lib/chains";
+import { PRIMARY_CHAIN, PRIMARY_CHAIN_ID } from "@/lib/chains";
 
 export default function ProductsPage() {
-  const chainId = useChainId();
-  const supported = hasMarketplace(chainId);
-  const chainName = useMemo(() => supportedChains.find((chain) => chain.id === chainId)?.name ?? "current network", [chainId]);
+  const supported = hasMarketplace(PRIMARY_CHAIN_ID);
+  const chainName = PRIMARY_CHAIN.name;
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
@@ -33,7 +31,7 @@ export default function ProductsPage() {
       setError(undefined);
 
       try {
-        const result = await fetchProducts({ chainId, status: "active", limit: 40 });
+        const result = await fetchProducts({ chainId: PRIMARY_CHAIN_ID, status: "active", limit: 40 });
         if (!cancelled) {
           setProducts(result.products);
         }
@@ -53,7 +51,7 @@ export default function ProductsPage() {
     return () => {
       cancelled = true;
     };
-  }, [chainId, supported]);
+  }, [supported]);
 
   return (
     <div className="space-y-6">

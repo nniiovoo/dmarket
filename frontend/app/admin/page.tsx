@@ -2,28 +2,29 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useAccount, useChainId, useReadContract } from "wagmi";
+import { useAccount, useReadContract } from "wagmi";
 
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { OrderBadge } from "@/components/OrderBadge";
 import { TxPanel } from "@/components/TxPanel";
+import { PRIMARY_CHAIN_ID } from "@/lib/chains";
 import { getActiveMarketplace, hasMarketplace } from "@/lib/contracts";
 import { formatAmount, normalizeOrder, OrderStatus, sameAddress } from "@/lib/order";
 
 const refetchInterval = 12_000;
 
 export default function AdminPage() {
-  const chainId = useChainId();
   const { address, isConnected } = useAccount();
-  const active = getActiveMarketplace(chainId);
-  const supported = hasMarketplace(chainId);
+  const active = getActiveMarketplace(PRIMARY_CHAIN_ID);
+  const supported = hasMarketplace(PRIMARY_CHAIN_ID);
   const [orderIdInput, setOrderIdInput] = useState("");
   const orderId = useMemo(() => parseOrderId(orderIdInput), [orderIdInput]);
 
   const ownerQuery = useReadContract({
     address: active?.address,
     abi: active?.abi,
+    chainId: PRIMARY_CHAIN_ID,
     functionName: "owner",
     query: { enabled: supported, refetchInterval }
   });
@@ -31,6 +32,7 @@ export default function AdminPage() {
   const orderQuery = useReadContract({
     address: active?.address,
     abi: active?.abi,
+    chainId: PRIMARY_CHAIN_ID,
     functionName: "getOrder",
     args: orderId === undefined ? undefined : [orderId],
     query: { enabled: supported && orderId !== undefined, retry: false, refetchInterval }
@@ -119,6 +121,7 @@ export default function AdminPage() {
               buildTransaction={() => ({
                 address: active?.address,
                 abi: active?.abi,
+                chainId: PRIMARY_CHAIN_ID,
                 functionName: "resolveDispute",
                 args: [orderId, true]
               })}
@@ -132,6 +135,7 @@ export default function AdminPage() {
               buildTransaction={() => ({
                 address: active?.address,
                 abi: active?.abi,
+                chainId: PRIMARY_CHAIN_ID,
                 functionName: "resolveDispute",
                 args: [orderId, false]
               })}
@@ -145,6 +149,7 @@ export default function AdminPage() {
               buildTransaction={() => ({
                 address: active?.address,
                 abi: active?.abi,
+                chainId: PRIMARY_CHAIN_ID,
                 functionName: "ownerEmergencyRefund",
                 args: [orderId]
               })}
