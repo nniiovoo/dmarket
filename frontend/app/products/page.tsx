@@ -76,7 +76,7 @@ export default function ProductsPage() {
         ) : error ? (
           <EmptyState title="Could not load products" body={error} />
         ) : !supported ? (
-          <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia to browse products." />
+          <EmptyState title="Configuration missing" body="Arbitrum marketplace addresses are not configured." />
         ) : products.length === 0 ? (
           <EmptyState title="No products yet" body="No active products on this chain. Create the first listing from Sell." />
         ) : (

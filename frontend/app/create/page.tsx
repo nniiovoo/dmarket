@@ -76,7 +76,7 @@ function CreateOrderForm({
         {!isConnected ? (
           <EmptyState title="Connect wallet" body="Connect the buyer wallet before creating an order." />
         ) : !supported ? (
-          <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia." />
+          <EmptyState title="Configuration missing" body="Arbitrum marketplace addresses are not configured." />
         ) : (
           <div className="space-y-4">
             <Field label="Seller address" value={seller} onChange={setSeller} placeholder="0x..." />

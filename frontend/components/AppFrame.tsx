@@ -11,7 +11,6 @@ import { WalletButton } from "@/components/WalletButton";
 import { fetchSellerOrders } from "@/lib/api/seller";
 import { PRIMARY_CHAIN_ID } from "@/lib/chains";
 import { hasMarketplace } from "@/lib/contracts";
-import { usePromptPrimaryChain } from "@/lib/usePromptPrimaryChain";
 
 const navItems = [
   { href: "/", label: "Home" },
@@ -25,8 +24,6 @@ const navItems = [
 ];
 
 export function AppFrame({ children }: { children: ReactNode }) {
-  usePromptPrimaryChain();
-
   const pathname = usePathname();
   const { address, isConnected } = useAccount();
   const seller = address?.toLowerCase();

@@ -9,6 +9,7 @@ import { PRIMARY_CHAIN_ID } from "@/lib/chains";
 import { getActiveMarketplace } from "@/lib/contracts";
 import { decodeDappError, type DappError } from "@/lib/errors";
 import { findCreatedOrderId } from "@/lib/orderEvents";
+import { useEnsureChain } from "@/lib/useEnsureChain";
 
 export type BuyNowState =
   | { kind: "idle" }
@@ -19,10 +20,11 @@ export type BuyNowState =
 
 export function useBuyNow() {
   const chainId = useChainId();
-  const { address, connector } = useAccount();
+  const { address } = useAccount();
   const active = getActiveMarketplace(PRIMARY_CHAIN_ID);
   const supported = active !== undefined;
   const { writeContractAsync } = useWriteContract();
+  const { ensure, switching } = useEnsureChain();
   const [state, setState] = useState<BuyNowState>({ kind: "idle" });
   const handledReceipt = useRef<Hash | undefined>(undefined);
   const submittedHash = state.kind === "submitted" ? state.hash : undefined;
@@ -78,8 +80,8 @@ export function useBuyNow() {
       setState({
         kind: "failed",
         error: {
-          title: "Unsupported network",
-          message: "Switch to a supported chain.",
+          title: "Configuration missing",
+          message: "Arbitrum marketplace addresses are not configured.",
           tone: "warning",
           category: "wrong-network"
         }
@@ -100,13 +102,14 @@ export function useBuyNow() {
       return;
     }
 
-    const connectorChainId = await connector?.getChainId();
-    if (connectorChainId !== PRIMARY_CHAIN_ID) {
+    try {
+      await ensure(PRIMARY_CHAIN_ID);
+    } catch {
       setState({
         kind: "failed",
         error: {
-          title: "Wallet is on the wrong network",
-          message: "Your wallet is not on Arbitrum Sepolia yet. Switch MetaMask to Arbitrum Sepolia, then refresh and try again.",
+          title: "Network switch required",
+          message: "Network switch required",
           tone: "warning",
           category: "wrong-network"
         }
@@ -138,5 +141,5 @@ export function useBuyNow() {
     setState({ kind: "idle" });
   }
 
-  return { state, buyNow, reset };
+  return { state, buyNow, reset, switching };
 }

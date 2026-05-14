@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Hash } from "viem";
-import { useAccount, useChainId, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
+import { useAccount, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 
 import {
   evidenceRegistryV3Abi,
@@ -10,6 +10,7 @@ import {
 } from "@/lib/contracts";
 import { decodeDappError } from "@/lib/errors";
 import type { ApiOrder } from "@/lib/orders";
+import { useEnsureChain } from "@/lib/useEnsureChain";
 
 export function SubmitEvidenceDialog({
   order,
@@ -20,13 +21,12 @@ export function SubmitEvidenceDialog({
   onClose: () => void;
   onSubmitted: () => void;
 }) {
-  const currentChainId = useChainId();
   const { address: connectedAddress } = useAccount();
   const v3 = getV3ContractAddresses(order.chainId);
   const registryAddress = v3?.evidenceRegistry;
-  const onOrderChain = currentChainId === order.chainId;
 
   const { writeContractAsync, isPending: walletPending } = useWriteContract();
+  const { ensure, switching } = useEnsureChain();
   const [evidenceURI, setEvidenceURI] = useState("");
   const [fireOracle, setFireOracle] = useState(false);
   const [hash, setHash] = useState<Hash | undefined>();
@@ -34,7 +34,7 @@ export function SubmitEvidenceDialog({
   const handledReceipt = useRef<Hash | undefined>(undefined);
   const receipt = useWaitForTransactionReceipt({ hash });
   const receiptPending = hash !== undefined && receipt.isPending;
-  const busy = walletPending || receiptPending;
+  const busy = walletPending || receiptPending || switching;
   const trimmedURI = evidenceURI.trim();
 
   const normalizedConnected = connectedAddress?.toLowerCase();
@@ -66,10 +66,18 @@ export function SubmitEvidenceDialog({
     }
     setError(undefined);
     try {
+      try {
+        await ensure(order.chainId);
+      } catch {
+        setError("Network switch required");
+        return;
+      }
+
       const args = [BigInt(order.onChainOrderId), trimmedURI] as const;
       const txHash = await writeContractAsync({
         address: registryAddress,
         abi: evidenceRegistryV3Abi,
+        chainId: order.chainId,
         functionName: fireOracle ? "submitEvidenceWithOracleQuery" : "submitEvidence",
         args
       });
@@ -93,11 +101,6 @@ export function SubmitEvidenceDialog({
         {!registryAddress && (
           <div className="mt-3 rounded bg-amber-50 p-2 text-sm text-amber-800">
             EvidenceRegistry is not configured on this chain yet.
-          </div>
-        )}
-        {registryAddress && !onOrderChain && (
-          <div className="mt-3 rounded bg-amber-50 p-2 text-sm text-amber-800">
-            Switch wallet network to chain {order.chainId} to submit.
           </div>
         )}
         {registryAddress && !isParty && (
@@ -145,10 +148,10 @@ export function SubmitEvidenceDialog({
           </button>
           <button
             onClick={submit}
-            disabled={busy || !registryAddress || !onOrderChain || !isParty || trimmedURI.length === 0}
+            disabled={busy || !registryAddress || !isParty || trimmedURI.length === 0}
             className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {busy ? "Submitting…" : fireOracle ? "Submit + Query Oracle" : "Submit Evidence"}
+            {switching ? "Switching network..." : busy ? "Submitting…" : fireOracle ? "Submit + Query Oracle" : "Submit Evidence"}
           </button>
         </div>
       </div>

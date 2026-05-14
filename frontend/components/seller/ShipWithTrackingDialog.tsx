@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Hash } from "viem";
-import { useAccount, useChainId, useSignMessage, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
+import { useSignMessage, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 
 import { CarrierBadge } from "@/components/CarrierBadge";
 import { CARRIERS, detectCarrier, type CarrierCode } from "@/lib/carriers";
@@ -11,6 +11,7 @@ import { updateShipping } from "@/lib/api/shipping";
 import { getActiveMarketplace, hasMarketplace } from "@/lib/contracts";
 import { decodeDappError } from "@/lib/errors";
 import type { ApiOrder } from "@/lib/orders";
+import { useEnsureChain } from "@/lib/useEnsureChain";
 
 export function ShipWithTrackingDialog({
   order,
@@ -22,13 +23,10 @@ export function ShipWithTrackingDialog({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const currentChainId = useChainId();
-  const { connector } = useAccount();
   const active = getActiveMarketplace(order.chainId);
-  const onOrderChain = currentChainId === order.chainId;
-  const canSendOnCurrentChain = hasMarketplace(currentChainId) && onOrderChain;
   const { writeContractAsync, isPending: walletPending } = useWriteContract();
   const { signMessageAsync } = useSignMessage();
+  const { ensure, switching } = useEnsureChain();
   const [trackingNumber, setTrackingNumber] = useState("");
   const [manualUrl, setManualUrl] = useState("");
   const [shippingNote, setShippingNote] = useState("");
@@ -66,7 +64,7 @@ export function ShipWithTrackingDialog({
 
     return undefined;
   }, [carrier, hasShippingDetails, manualUrl]);
-  const busy = walletPending || receiptPending || shippingPhase !== "idle";
+  const busy = walletPending || receiptPending || switching || shippingPhase !== "idle";
 
   const saveShippingDetails = useCallback(async () => {
     if (!hasShippingDetails || validation) {
@@ -130,9 +128,9 @@ export function ShipWithTrackingDialog({
   }, [hash, hasShippingDetails, order.chainId, queryClient, receipt.isSuccess, saveShippingDetails, sellerAddress]);
 
   async function submit() {
-    if (validation || !active || !canSendOnCurrentChain) {
-      if (!canSendOnCurrentChain) {
-        setError("Switch to the order's chain before confirming shipment.");
+    if (validation || !active || !hasMarketplace(order.chainId)) {
+      if (!active || !hasMarketplace(order.chainId)) {
+        setError("This order's chain is not configured.");
       }
       return;
     }
@@ -146,9 +144,10 @@ export function ShipWithTrackingDialog({
     }
 
     try {
-      const connectorChainId = await connector?.getChainId();
-      if (connectorChainId !== order.chainId || !hasMarketplace(connectorChainId)) {
-        setError("Your wallet is not actually on this order's chain yet. Switch MetaMask to the correct chain, then refresh and try again.");
+      try {
+        await ensure(order.chainId);
+      } catch {
+        setError("Network switch required");
         return;
       }
 
@@ -213,9 +212,6 @@ export function ShipWithTrackingDialog({
             On-chain shipment confirmation is required. Tracking details are optional and can be skipped.
           </p>
           {validation ? <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">{validation}</p> : null}
-          {!canSendOnCurrentChain ? (
-            <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-800">Switch to this order&apos;s chain before sending the shipment transaction.</p>
-          ) : null}
           {error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
           {success ? <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-700">{success}</p> : null}
 
@@ -230,7 +226,7 @@ export function ShipWithTrackingDialog({
             <button
               type="button"
               onClick={() => void submit()}
-              disabled={busy || validation !== undefined || !active || !canSendOnCurrentChain || Boolean(success)}
+              disabled={busy || validation !== undefined || !active || Boolean(success)}
               className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               {buttonLabel({ walletPending, receiptPending, shippingPhase, chainConfirmed, hasShippingDetails })}

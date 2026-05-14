@@ -59,7 +59,7 @@ export default function AdminPage() {
         {!isConnected ? (
           <EmptyState title="Connect wallet" body="Connect the owner wallet to use admin actions." />
         ) : !supported ? (
-          <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia." />
+          <EmptyState title="Configuration missing" body="Arbitrum marketplace addresses are not configured." />
         ) : ownerQuery.isLoading ? (
           <SkeletonLine className="w-1/2" />
         ) : (

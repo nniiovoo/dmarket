@@ -70,7 +70,7 @@ export default function NewProductPage() {
         {!isConnected ? (
           <EmptyState title="Connect wallet" body="Connect the seller wallet before creating a product." />
         ) : !supported ? (
-          <EmptyState title="Unsupported network" body="Switch to Sepolia, Polygon Amoy, or Arbitrum Sepolia." />
+          <EmptyState title="Configuration missing" body="Arbitrum marketplace addresses are not configured." />
         ) : (
           <div className="space-y-4">
             <Field label="Name" value={name} onChange={setName} placeholder="Vintage hoodie" />

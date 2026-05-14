@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatEther, type Address, type Hash } from "viem";
-import { useAccount, useChainId, useReadContract, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
+import { useAccount, useReadContract, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 
 import {
   getKlerosCaseUrl,
@@ -12,6 +12,7 @@ import {
 } from "@/lib/contracts";
 import { decodeDappError } from "@/lib/errors";
 import type { ApiOrder } from "@/lib/orders";
+import { useEnsureChain } from "@/lib/useEnsureChain";
 
 const arbitratorAbi = [
   {
@@ -30,11 +31,9 @@ export function EscalateToKlerosButton({
   order: ApiOrder;
   onEscalated?: () => void;
 }) {
-  const currentChainId = useChainId();
   const { address } = useAccount();
   const v3 = getV3ContractAddresses(order.chainId);
   const adapter = v3?.klerosAdapter;
-  const onOrderChain = currentChainId === order.chainId;
   const klerosEnabled = isKlerosAdapterDeployed(order.chainId);
 
   const { data: existingDisputeIDRaw } = useReadContract({
@@ -77,12 +76,13 @@ export function EscalateToKlerosButton({
 
   const cost = typeof costRaw === "bigint" ? costRaw : undefined;
   const { writeContractAsync, isPending: walletPending } = useWriteContract();
+  const { ensure, switching } = useEnsureChain();
   const [hash, setHash] = useState<Hash | undefined>();
   const [error, setError] = useState<string | undefined>();
   const handledReceipt = useRef<Hash | undefined>(undefined);
   const receipt = useWaitForTransactionReceipt({ hash });
   const receiptPending = hash !== undefined && receipt.isPending;
-  const busy = walletPending || receiptPending;
+  const busy = walletPending || receiptPending || switching;
 
   useEffect(() => {
     if (receipt.isSuccess && handledReceipt.current !== hash) {
@@ -131,9 +131,17 @@ export function EscalateToKlerosButton({
     }
     setError(undefined);
     try {
+      try {
+        await ensure(order.chainId);
+      } catch {
+        setError("Network switch required");
+        return;
+      }
+
       const txHash = await writeContractAsync({
         address: adapter,
         abi: klerosV2DisputeAdapterAbi,
+        chainId: order.chainId,
         functionName: "escalateToKleros",
         args: [BigInt(order.onChainOrderId)],
         value: cost
@@ -157,19 +165,14 @@ export function EscalateToKlerosButton({
 
       {error && <div className="mt-2 rounded bg-red-50 p-2 text-xs text-red-700">{error}</div>}
 
-      {!onOrderChain && (
-        <div className="mt-2 text-xs text-amber-700">
-          Switch wallet to chain {order.chainId} to escalate.
-        </div>
-      )}
       {!isParty && <div className="mt-2 text-xs text-amber-700">You are not a party of this order.</div>}
 
       <button
         onClick={submit}
-        disabled={busy || !isParty || !onOrderChain || cost === undefined}
+        disabled={busy || !isParty || cost === undefined}
         className="mt-3 rounded bg-amber-600 px-3 py-1.5 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
       >
-        {busy ? "Escalating..." : "Escalate to Kleros"}
+        {switching ? "Switching network..." : busy ? "Escalating..." : "Escalate to Kleros"}
       </button>
     </div>
   );

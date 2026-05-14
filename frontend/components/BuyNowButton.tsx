@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useAccount, useChainId } from "wagmi";
+import { useAccount } from "wagmi";
 import { parseEther } from "viem";
 
 import { PRIMARY_CHAIN_ID, getExplorerTxUrl, getFaucetUrl } from "@/lib/chains";
@@ -34,19 +34,15 @@ export function BuyNowButton({
   disabledReason
 }: BuyNowButtonProps) {
   const router = useRouter();
-  const chainId = useChainId();
-  const { address, connector, isConnected } = useAccount();
-  const [connectorChainId, setConnectorChainId] = useState<number | undefined>();
-  const { state, buyNow, reset } = useBuyNow();
+  const { address } = useAccount();
+  const { state, buyNow, reset, switching } = useBuyNow();
   const optimistic = useOptimisticOrder();
   const handledConfirmedOrder = useRef<string | undefined>(undefined);
   const hash = state.kind === "submitted" || state.kind === "confirmed" ? state.hash : undefined;
   const txUrl = getExplorerTxUrl(PRIMARY_CHAIN_ID, hash);
   const faucetUrl = getFaucetUrl(PRIMARY_CHAIN_ID);
-  const effectiveWalletChainId = connectorChainId ?? chainId;
-  const unsupported = isConnected && effectiveWalletChainId !== PRIMARY_CHAIN_ID;
-  const disabled = externallyDisabled || unsupported || state.kind === "waitingSignature" || state.kind === "submitted";
-  const effectiveDisabledReason = unsupported ? "Switch to a supported chain before buying." : disabledReason;
+  const disabled = externallyDisabled || switching || state.kind === "waitingSignature" || state.kind === "submitted";
+  const effectiveDisabledReason = disabledReason;
   const errorTone =
     state.kind === "failed"
       ? state.error.tone === "danger"
@@ -66,7 +62,7 @@ export function BuyNowButton({
 
     handledConfirmedOrder.current = orderId;
     const timeout = window.setTimeout(() => {
-        optimistic.addPending({
+      optimistic.addPending({
         chainId: PRIMARY_CHAIN_ID,
         onChainOrderId: orderId,
         buyer: address.toLowerCase(),
@@ -81,23 +77,6 @@ export function BuyNowButton({
     return () => window.clearTimeout(timeout);
   }, [address, optimistic, priceEth, productId, productImageUrl, productName, productStatus, router, seller, state]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadConnectorChain() {
-      const nextChainId = await connector?.getChainId();
-      if (!cancelled) {
-        setConnectorChainId(nextChainId);
-      }
-    }
-
-    void loadConnectorChain();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [chainId, connector]);
-
   return (
     <div className="space-y-3">
       <button
@@ -107,9 +86,9 @@ export function BuyNowButton({
         aria-label={`Buy ${productName}`}
         className="mt-4 inline-flex w-full justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
       >
-        {unsupported ? "Switch to supported chain" : buttonLabel(state.kind, priceEth)}
+        {switching ? "Switching network..." : buttonLabel(state.kind, priceEth)}
       </button>
-      {(externallyDisabled || unsupported) && effectiveDisabledReason ? <p className="text-sm text-slate-500">{effectiveDisabledReason}</p> : null}
+      {externallyDisabled && effectiveDisabledReason ? <p className="text-sm text-slate-500">{effectiveDisabledReason}</p> : null}
 
       {state.kind === "waitingSignature" ? <WalletPopupHint /> : null}
 
