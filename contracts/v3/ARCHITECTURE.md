@@ -165,3 +165,24 @@ Deployment order (same as Sepolia):
 9. `migrateMarketplaceToKlerosAdapter`
 
 All scripts auto-detect the network from the `--network` flag.
+
+### Frontend usage
+
+The frontend only renders the Kleros escalation controls on Arbitrum Sepolia
+when the V3 marketplace, vault, evidence registry, and adapter addresses are
+configured. Add these values to `/Users/ni/web3/dApp/frontend/.env.local`:
+
+```bash
+NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS=0x1E0357FCE511C864331A45cef0AE42BA8d5a84dD
+NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_VAULT_ADDRESS=0xeCec8417AA2bf5071fC6d3F85875dc43c68D7C15
+NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_EVIDENCE_REGISTRY_ADDRESS=0x7D4999C3B9ff2B3614479d1ed052A75A5bE0D690
+NEXT_PUBLIC_KLEROS_ADAPTER_ARBITRUMSEPOLIA_ADDRESS=0x04dA4a7aA65a5244B28Eb65eC1e9b29c84903699
+```
+
+Seed the Arbitrum Sepolia disputed order (order 1) into the local DB:
+
+```bash
+cd frontend
+SEED_CHAIN=arbitrumSepolia npx tsx scripts/seedV3Orders.ts 1
+SEED_CHAIN=arbitrumSepolia npx tsx scripts/seedV3Evidence.ts 1
+```

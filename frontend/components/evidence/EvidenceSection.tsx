@@ -3,9 +3,10 @@
 import { useState } from "react";
 
 import { Card } from "@/components/Card";
-import { isEvidenceRegistryDeployed } from "@/lib/contracts";
+import { isEvidenceRegistryDeployed, isKlerosAdapterDeployed } from "@/lib/contracts";
 import type { ApiOrder } from "@/lib/orders";
 
+import { EscalateToKlerosButton } from "./EscalateToKlerosButton";
 import { EvidenceTimeline } from "./EvidenceTimeline";
 import { SubmitEvidenceDialog } from "./SubmitEvidenceDialog";
 
@@ -14,8 +15,10 @@ const ELIGIBLE_STATUSES = new Set(["Paid", "Shipped", "Disputed"]);
 export function EvidenceSection({ order }: { order: ApiOrder }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const evidenceRegistryDeployed = isEvidenceRegistryDeployed(order.chainId);
+  const klerosAdapterDeployed = isKlerosAdapterDeployed(order.chainId);
 
-  if (!isEvidenceRegistryDeployed(order.chainId)) {
+  if (!evidenceRegistryDeployed && !klerosAdapterDeployed) {
     return null;
   }
 
@@ -25,7 +28,7 @@ export function EvidenceSection({ order }: { order: ApiOrder }) {
     <Card
       title="Dispute evidence"
       action={
-        canSubmit && (
+        evidenceRegistryDeployed && canSubmit && (
           <button
             onClick={() => setDialogOpen(true)}
             className="rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700"
@@ -39,6 +42,11 @@ export function EvidenceSection({ order }: { order: ApiOrder }) {
         chainId={order.chainId}
         onChainOrderId={order.onChainOrderId}
         refreshKey={refreshKey}
+      />
+
+      <EscalateToKlerosButton
+        order={order}
+        onEscalated={() => setRefreshKey((k) => k + 1)}
       />
 
       {dialogOpen && (

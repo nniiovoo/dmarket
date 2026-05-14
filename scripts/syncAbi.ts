@@ -21,6 +21,10 @@ const abiTargets = [
   {
     artifact: "artifacts/contracts/v3/EvidenceRegistryV3.sol/EvidenceRegistryV3.json",
     output: "frontend/abi/EvidenceRegistryV3.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3/KlerosV2DisputeAdapter.sol/KlerosV2DisputeAdapter.json",
+    output: "frontend/abi/KlerosV2DisputeAdapter.json"
   }
 ];
 

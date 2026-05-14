@@ -6,12 +6,14 @@ import escrowVaultAbiJson from "@/abi/EscrowVault.json";
 import escrowMarketplaceV3AbiJson from "@/abi/EscrowMarketplaceV3.json";
 import escrowVaultV3AbiJson from "@/abi/EscrowVaultV3.json";
 import evidenceRegistryV3AbiJson from "@/abi/EvidenceRegistryV3.json";
+import klerosAdapterAbiJson from "@/abi/KlerosV2DisputeAdapter.json";
 
 export const escrowMarketplaceV2Abi = escrowMarketplaceV2AbiJson as Abi;
 export const escrowVaultAbi = escrowVaultAbiJson as Abi;
 export const escrowMarketplaceV3Abi = escrowMarketplaceV3AbiJson as Abi;
 export const escrowVaultV3Abi = escrowVaultV3AbiJson as Abi;
 export const evidenceRegistryV3Abi = evidenceRegistryV3AbiJson as Abi;
+export const klerosV2DisputeAdapterAbi = klerosAdapterAbiJson as Abi;
 
 const fallbackAddresses = {
   [sepolia.id]: {
@@ -33,6 +35,7 @@ export type V3ContractAddresses = {
   marketplace: Address;
   vault: Address;
   evidenceRegistry?: Address;
+  klerosAdapter?: Address;
 };
 
 export function getContractAddresses(chainId: number | undefined): ContractAddresses | undefined {
@@ -74,7 +77,8 @@ export function getV3ContractAddresses(chainId: number | undefined): V3ContractA
     return {
       marketplace,
       vault,
-      evidenceRegistry: process.env.NEXT_PUBLIC_V3_SEPOLIA_EVIDENCE_REGISTRY_ADDRESS as Address | undefined
+      evidenceRegistry: process.env.NEXT_PUBLIC_V3_SEPOLIA_EVIDENCE_REGISTRY_ADDRESS as Address | undefined,
+      klerosAdapter: process.env.NEXT_PUBLIC_KLEROS_ADAPTER_SEPOLIA_ADDRESS as Address | undefined
     };
   }
 
@@ -96,7 +100,8 @@ export function getV3ContractAddresses(chainId: number | undefined): V3ContractA
     return {
       marketplace,
       vault,
-      evidenceRegistry: process.env.NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_EVIDENCE_REGISTRY_ADDRESS as Address | undefined
+      evidenceRegistry: process.env.NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_EVIDENCE_REGISTRY_ADDRESS as Address | undefined,
+      klerosAdapter: process.env.NEXT_PUBLIC_KLEROS_ADAPTER_ARBITRUMSEPOLIA_ADDRESS as Address | undefined
     };
   }
 
@@ -114,4 +119,18 @@ export function isV3Supported(chainId: number | undefined) {
 export function isEvidenceRegistryDeployed(chainId: number | undefined) {
   const addrs = getV3ContractAddresses(chainId);
   return addrs?.evidenceRegistry !== undefined;
+}
+
+export function isKlerosAdapterDeployed(chainId: number | undefined): boolean {
+  return chainId === arbitrumSepolia.id && getV3ContractAddresses(chainId)?.klerosAdapter !== undefined;
+}
+
+/** Returns the v2-testnet.kleros.builders URL for a given Kleros disputeID
+    on Arbitrum Sepolia. Returns undefined if the chain doesn't have a known
+    Kleros UI. */
+export function getKlerosCaseUrl(chainId: number | undefined, disputeID: bigint | string): string | undefined {
+  if (chainId === arbitrumSepolia.id) {
+    return `https://v2-testnet.kleros.builders/#/cases/${disputeID.toString()}`;
+  }
+  return undefined;
 }
