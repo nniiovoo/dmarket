@@ -24,9 +24,13 @@ export default function PaymentTestPage() {
         amountWei={parseEther("0.001")}
         label="Test order"
         executeMode={liveMode ? "live" : "dry"}
+        seller="0x6eCc616BfB1A6Dd2e82D461Ba958D47A823C1d55"
+        productId={42n}
         onDirectConfirm={() => console.log("[demo] direct path confirmed")}
         onCrossChainConfirm={(quote) => console.log("[demo] cross-chain confirmed", quote)}
         onBridgeComplete={(info) => console.log("[demo] bridge complete", info)}
+        onOrderCreated={(orderId, txHash) => console.log("[demo] order created", orderId, txHash)}
+        onError={(message) => console.error("[demo] error", message)}
       />
       <div className="mt-4 text-xs text-slate-500">
         {liveMode

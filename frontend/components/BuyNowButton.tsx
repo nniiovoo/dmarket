@@ -1,26 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAccount } from "wagmi";
-import { parseEther } from "viem";
+import { parseEther, type Address } from "viem";
 
-import { PRIMARY_CHAIN_ID, getExplorerTxUrl, getFaucetUrl } from "@/lib/chains";
-import { useOptimisticOrder } from "@/lib/useOptimisticOrder";
-import { useBuyNow } from "@/lib/useBuyNow";
-import { Toast } from "@/components/Toast";
-import { WalletPopupHint } from "@/components/WalletPopupHint";
+import { PayViaAnyChain } from "@/components/payment/PayViaAnyChain";
+import { PRIMARY_CHAIN_ID } from "@/lib/chains";
 
 type BuyNowButtonProps = {
-  seller: string;
+  seller: Address | string;
   productId: bigint;
   priceEth: string;
-  productName: string;
+  productName?: string;
   productImageUrl?: string;
   productStatus?: string;
   disabled?: boolean;
   disabledReason?: string;
+  label?: string;
 };
 
 export function BuyNowButton({
@@ -28,151 +24,75 @@ export function BuyNowButton({
   productId,
   priceEth,
   productName,
-  productImageUrl = "",
-  productStatus = "active",
-  disabled: externallyDisabled,
-  disabledReason
+  disabled,
+  disabledReason,
+  label
 }: BuyNowButtonProps) {
   const router = useRouter();
-  const { address } = useAccount();
-  const { state, buyNow, reset, switching } = useBuyNow();
-  const optimistic = useOptimisticOrder();
-  const handledConfirmedOrder = useRef<string | undefined>(undefined);
-  const hash = state.kind === "submitted" || state.kind === "confirmed" ? state.hash : undefined;
-  const txUrl = getExplorerTxUrl(PRIMARY_CHAIN_ID, hash);
-  const faucetUrl = getFaucetUrl(PRIMARY_CHAIN_ID);
-  const disabled = externallyDisabled || switching || state.kind === "waitingSignature" || state.kind === "submitted";
-  const effectiveDisabledReason = disabledReason;
-  const errorTone =
-    state.kind === "failed"
-      ? state.error.tone === "danger"
-        ? "border-red-200 bg-red-50 text-red-800"
-        : "border-amber-200 bg-amber-50 text-amber-900"
-      : "";
-
-  useEffect(() => {
-    if (state.kind !== "confirmed" || state.orderId === undefined || address === undefined) {
-      return undefined;
-    }
-
-    const orderId = state.orderId.toString();
-    if (handledConfirmedOrder.current === orderId) {
-      return undefined;
-    }
-
-    handledConfirmedOrder.current = orderId;
-    const timeout = window.setTimeout(() => {
-      optimistic.addPending({
-        chainId: PRIMARY_CHAIN_ID,
-        onChainOrderId: orderId,
-        buyer: address.toLowerCase(),
-        seller: seller.toLowerCase(),
-        productId: productId.toString(),
-        amountWei: toWeiString(priceEth),
-        product: toProductSummary(productId, productName, productImageUrl, productStatus)
-      });
-      router.push(`/orders/${orderId}`);
-    }, 2_000);
-
-    return () => window.clearTimeout(timeout);
-  }, [address, optimistic, priceEth, productId, productImageUrl, productName, productStatus, router, seller, state]);
+  const [open, setOpen] = useState(false);
+  const amountWei = safeParseEther(priceEth);
+  const buttonDisabled = disabled || amountWei === undefined;
 
   return (
-    <div className="space-y-3">
+    <>
       <button
         type="button"
-        onClick={() => void buyNow({ seller, productId, priceEth })}
-        disabled={disabled}
-        aria-label={`Buy ${productName}`}
-        className="mt-4 inline-flex w-full justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+        onClick={() => setOpen(true)}
+        disabled={buttonDisabled}
+        aria-label={productName ? `Buy ${productName}` : "Buy now"}
+        className="mt-4 inline-flex w-full justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
       >
-        {switching ? "Switching network..." : buttonLabel(state.kind, priceEth)}
+        {label ?? `Buy now (${priceEth} ETH)`}
       </button>
-      {externallyDisabled && effectiveDisabledReason ? <p className="text-sm text-slate-500">{effectiveDisabledReason}</p> : null}
+      {buttonDisabled && disabledReason ? <p className="mt-2 text-sm text-slate-500">{disabledReason}</p> : null}
 
-      {state.kind === "waitingSignature" ? <WalletPopupHint /> : null}
+      {open && amountWei !== undefined ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-lg bg-white p-5 shadow-lg"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-slate-950">Complete purchase</h2>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded px-2 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close purchase dialog"
+              >
+                x
+              </button>
+            </div>
 
-      {state.kind === "submitted" ? (
-        <div className="rounded-md bg-slate-50 p-3 text-sm text-slate-600">
-          <p className="font-medium text-slate-900">Tx submitted. Waiting for chain confirmation.</p>
-          {txUrl ? (
-            <a href={txUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block break-all text-blue-700 underline">
-              {state.hash}
-            </a>
-          ) : (
-            <p className="mt-1 break-all">{state.hash}</p>
-          )}
+            <PayViaAnyChain
+              amountWei={amountWei}
+              label={productName ?? "Order"}
+              executeMode="live"
+              seller={seller as Address}
+              productId={productId}
+              onOrderCreated={(orderId, txHash) => {
+                console.log("[BuyNow] order created", orderId, txHash);
+                setOpen(false);
+                router.push(`/orders/${orderId.toString()}?chainId=${PRIMARY_CHAIN_ID}`);
+              }}
+              onError={(message) => {
+                console.error("[BuyNow] error", message);
+              }}
+            />
+          </div>
         </div>
       ) : null}
-
-      {state.kind === "confirmed" ? (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-          {state.orderId !== undefined ? (
-            <>
-              <p className="font-semibold text-emerald-900">订单 #{state.orderId.toString()} 创建成功！</p>
-              <p className="mt-1">链上已确认。正在跳转到订单详情，商品信息可能还在同步。</p>
-              <Link href={`/orders/${state.orderId.toString()}`} className="mt-2 inline-block text-blue-700 underline">
-                立即查看
-              </Link>
-              <Toast message={`订单 #${state.orderId.toString()} 创建成功，链上已确认。`} />
-            </>
-          ) : (
-            <p>Transaction confirmed. Order event not found yet; check buyer orders after the indexer syncs.</p>
-          )}
-        </div>
-      ) : null}
-
-      {state.kind === "failed" ? (
-        <div className={`rounded-md border p-3 text-sm ${errorTone}`}>
-          <p className="font-medium">{state.error.title}</p>
-          <p className="mt-1">{state.error.message}</p>
-          {state.error.category === "insufficient-funds" && faucetUrl ? (
-            <a href={faucetUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block underline">
-              Open faucet
-            </a>
-          ) : null}
-          <button type="button" onClick={reset} className="mt-2 block text-blue-700 underline">
-            Try again
-          </button>
-        </div>
-      ) : null}
-    </div>
+    </>
   );
 }
 
-function buttonLabel(kind: ReturnType<typeof useBuyNow>["state"]["kind"], priceEth: string) {
-  if (kind === "waitingSignature") {
-    return "Waiting for wallet signature...";
-  }
-  if (kind === "submitted") {
-    return "Confirming on blockchain...";
-  }
-  if (kind === "confirmed") {
-    return "Confirmed";
-  }
-
-  return `Buy now (${priceEth} ETH / MATIC)`;
-}
-
-function toWeiString(priceEth: string) {
+function safeParseEther(value: string) {
   try {
-    return parseEther(priceEth).toString();
+    return parseEther(value);
   } catch {
-    return "0";
+    return undefined;
   }
-}
-
-function toProductSummary(productId: bigint, productName: string, productImageUrl: string, productStatus: string) {
-  const numericId = Number(productId);
-
-  if (!Number.isSafeInteger(numericId) || numericId <= 0) {
-    return null;
-  }
-
-  return {
-    id: numericId,
-    name: productName,
-    imageUrl: productImageUrl,
-    status: productStatus
-  };
 }

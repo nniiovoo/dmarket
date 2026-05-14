@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatEther } from "viem";
-import { useAccount, useChainId } from "wagmi";
+import { formatEther, type Address } from "viem";
+import { useAccount, useChainId, usePublicClient, useWriteContract } from "wagmi";
 
 import { PRIMARY_CHAIN, PRIMARY_CHAIN_ID, isPrimaryChain } from "@/lib/chains";
+import { getActiveMarketplace } from "@/lib/contracts";
 import { executeBridge, getCrossChainQuote, type CrossChainQuote } from "@/lib/lifi";
+import { findCreatedOrderId } from "@/lib/orderEvents";
+import { useEnsureChain } from "@/lib/useEnsureChain";
 
 const NATIVE = "0x0000000000000000000000000000000000000000" as `0x${string}`;
 
@@ -13,9 +16,13 @@ type Props = {
   amountWei: bigint;
   label?: string;
   executeMode?: "dry" | "live";
+  seller?: Address;
+  productId?: bigint;
   onDirectConfirm?: () => void;
   onCrossChainConfirm?: (quote: CrossChainQuote) => void;
   onBridgeComplete?: (info: { quote: CrossChainQuote; bridgeTxHash?: string }) => void;
+  onOrderCreated?: (orderId: bigint, txHash: string) => void;
+  onError?: (message: string) => void;
 };
 
 type BridgeStatus =
@@ -23,6 +30,14 @@ type BridgeStatus =
   | { kind: "starting" }
   | { kind: "running"; stepName?: string; message?: string }
   | { kind: "complete"; bridgeTxHash?: string }
+  | { kind: "failed"; error: string };
+
+type PaymentStatus =
+  | { kind: "idle" }
+  | { kind: "switching" }
+  | { kind: "signing" }
+  | { kind: "confirming" }
+  | { kind: "done"; orderId: bigint; txHash: string }
   | { kind: "failed"; error: string };
 
 type RouteStepWithExecution = {
@@ -40,19 +55,28 @@ export function PayViaAnyChain({
   amountWei,
   label,
   executeMode = "dry",
+  seller,
+  productId,
   onDirectConfirm,
   onCrossChainConfirm,
-  onBridgeComplete
+  onBridgeComplete,
+  onOrderCreated,
+  onError
 }: Props) {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const onPrimary = isPrimaryChain(chainId);
+  const publicClient = usePublicClient({ chainId: PRIMARY_CHAIN_ID });
+  const { writeContractAsync } = useWriteContract();
+  const { ensure } = useEnsureChain();
 
   const [quote, setQuote] = useState<CrossChainQuote | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | undefined>();
   const [status, setStatus] = useState("Ready");
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ kind: "idle" });
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>({ kind: "idle" });
+  const fullPurchaseMode = seller !== undefined && productId !== undefined;
 
   useEffect(() => {
     if (onPrimary || !isConnected || !address || !chainId) {
@@ -60,6 +84,7 @@ export function PayViaAnyChain({
       setQuoteError(undefined);
       setQuoting(false);
       setBridgeStatus({ kind: "idle" });
+      setPaymentStatus({ kind: "idle" });
       return;
     }
 
@@ -68,6 +93,7 @@ export function PayViaAnyChain({
     setQuote(null);
     setQuoteError(undefined);
     setBridgeStatus({ kind: "idle" });
+    setPaymentStatus({ kind: "idle" });
 
     getCrossChainQuote({
       fromChainId: chainId,
@@ -97,6 +123,65 @@ export function PayViaAnyChain({
       cancelled = true;
     };
   }, [onPrimary, isConnected, address, chainId, amountWei]);
+
+  async function executePayment() {
+    if (seller === undefined || productId === undefined) return;
+
+    const active = getActiveMarketplace(PRIMARY_CHAIN_ID);
+    if (!active) {
+      const message = "Marketplace not configured on primary chain";
+      setPaymentStatus({ kind: "failed", error: message });
+      onError?.(message);
+      return;
+    }
+    if (!publicClient) {
+      const message = "Primary chain public client is unavailable";
+      setPaymentStatus({ kind: "failed", error: message });
+      onError?.(message);
+      return;
+    }
+
+    try {
+      setPaymentStatus({ kind: "switching" });
+      await ensure(PRIMARY_CHAIN_ID);
+
+      setPaymentStatus({ kind: "signing" });
+      const txHash = await writeContractAsync({
+        address: active.address,
+        abi: active.abi,
+        functionName: "createAndPay",
+        args: [seller, productId],
+        value: amountWei,
+        chainId: PRIMARY_CHAIN_ID
+      });
+
+      setPaymentStatus({ kind: "confirming" });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+      const orderId = findCreatedOrderId(receipt);
+      if (orderId === undefined) {
+        throw new Error("OrderCreated event not found in receipt");
+      }
+
+      setPaymentStatus({ kind: "done", orderId, txHash });
+      onOrderCreated?.(orderId, txHash);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Payment failed";
+      setPaymentStatus({ kind: "failed", error: message });
+      onError?.(message);
+    }
+  }
+
+  const handleDirectConfirm = async () => {
+    console.log("[PayViaAnyChain] direct path confirmed");
+    onDirectConfirm?.();
+
+    if (fullPurchaseMode && executeMode === "live") {
+      await executePayment();
+      return;
+    }
+
+    setStatus("Direct payment simulated. No transaction was sent.");
+  };
 
   const handleCrossChainConfirm = async () => {
     if (!quote) return;
@@ -147,6 +232,9 @@ export function PayViaAnyChain({
       setStatus("Bridge complete. Funds are on the destination chain.");
       setBridgeStatus({ kind: "complete", bridgeTxHash: lastTx });
       onBridgeComplete?.({ quote, bridgeTxHash: lastTx });
+      if (fullPurchaseMode) {
+        await executePayment();
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Bridge execution failed";
       setStatus("Bridge failed.");
@@ -179,14 +267,7 @@ export function PayViaAnyChain({
       </div>
 
       {onPrimary ? (
-        <DirectPathCard
-          amountWei={amountWei}
-          onConfirm={() => {
-            console.log("[PayViaAnyChain] direct path confirmed");
-            setStatus("Direct payment simulated. No transaction was sent.");
-            onDirectConfirm?.();
-          }}
-        />
+        <DirectPathCard amountWei={amountWei} onConfirm={handleDirectConfirm} />
       ) : (
         <CrossChainPathCard
           currentChainId={chainId}
@@ -197,6 +278,8 @@ export function PayViaAnyChain({
           onConfirm={handleCrossChainConfirm}
         />
       )}
+
+      <PaymentStatusIndicator status={paymentStatus} />
     </div>
   );
 }
@@ -354,6 +437,71 @@ function BridgeProgressIndicator({ status }: { status: BridgeStatus }) {
   }
 
   return null;
+}
+
+function PaymentStatusIndicator({ status }: { status: PaymentStatus }) {
+  if (status.kind === "idle") return null;
+
+  if (status.kind === "switching") {
+    return (
+      <Panel color="blue" title="Switching network...">
+        Approve the network switch in your wallet.
+      </Panel>
+    );
+  }
+  if (status.kind === "signing") {
+    return (
+      <Panel color="blue" title="Confirm payment in wallet...">
+        Sign the createAndPay transaction.
+      </Panel>
+    );
+  }
+  if (status.kind === "confirming") {
+    return (
+      <Panel color="blue" title="Confirming on-chain...">
+        Waiting for block confirmation.
+      </Panel>
+    );
+  }
+  if (status.kind === "done") {
+    return (
+      <Panel color="emerald" title={`✓ Order ${status.orderId.toString()} created`}>
+        <div className="break-all font-mono">tx: {status.txHash}</div>
+      </Panel>
+    );
+  }
+  if (status.kind === "failed") {
+    return (
+      <Panel color="red" title="Payment failed">
+        {status.error}
+      </Panel>
+    );
+  }
+
+  return null;
+}
+
+function Panel({
+  color,
+  title,
+  children
+}: {
+  color: "blue" | "emerald" | "red";
+  title: string;
+  children: React.ReactNode;
+}) {
+  const cls = {
+    blue: "bg-blue-50 text-blue-800",
+    emerald: "bg-emerald-50 text-emerald-800",
+    red: "bg-red-50 text-red-800"
+  }[color];
+
+  return (
+    <div className={`mt-2 rounded ${cls} p-2 text-xs`}>
+      <div className="font-semibold">{title}</div>
+      <div className="mt-0.5">{children}</div>
+    </div>
+  );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
