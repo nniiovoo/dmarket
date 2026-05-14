@@ -96,7 +96,12 @@ async function main() {
   console.log("\n[2/6] Marketplace wiring");
   assertEq("marketplace.vault", await marketplace.vault(), vaultAddr);
   assertEq("marketplace.functionsRouter", await marketplace.functionsRouter(), expectedRouter);
-  assertEq("marketplace.owner", await marketplace.owner(), deployer);
+  // marketplace.owner can be either:
+  //   - the deployer EOA (pre-Kleros-migration), or
+  //   - the KlerosV2DisputeAdapter (post-migration, if KLEROS_ADAPTER_<NETWORK>_ADDRESS is set)
+  const klerosAdapter = process.env[`KLEROS_ADAPTER_${upper}_ADDRESS`];
+  const expectedOwner = klerosAdapter ?? deployer;
+  assertEq("marketplace.owner", await marketplace.owner(), expectedOwner);
   assertEq("marketplace.pendingOwner", await marketplace.pendingOwner(), "0x0000000000000000000000000000000000000000");
   assertEq("marketplace.nextOrderId (should be 1)", await marketplace.nextOrderId(), 1);
   assertEq("marketplace.paused", await marketplace.paused(), false);
