@@ -1,4 +1,4 @@
-import escrowMarketplaceV2AbiJson from "../../abi/EscrowMarketplaceV2.json";
+import escrowMarketplaceV3AbiJson from "../../abi/EscrowMarketplaceV3.json";
 import evidenceRegistryV3AbiJson from "../../abi/EvidenceRegistryV3.json";
 import { advanceIndexerState, normalizeLogs, processLogs } from "./catchUp";
 import {
@@ -34,7 +34,7 @@ export function liveWatch(chainId: number): () => void {
 
   const stopMarketplace = client.watchContractEvent({
     address: getIndexerMarketplaceAddress(chainId),
-    abi: escrowMarketplaceV2AbiJson,
+    abi: escrowMarketplaceV3AbiJson,
     pollingInterval: INDEXER_POLL_INTERVAL_MS,
     onLogs: handleLogs,
     onError: (error) => console.error(`[chain ${chainId}] marketplace watch error`, error)

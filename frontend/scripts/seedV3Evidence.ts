@@ -1,5 +1,10 @@
 // Seeds the Evidence table from on-chain EvidenceRegistry state.
 //
+// Now that the indexer covers V3 marketplace events on arbitrumSepolia,
+// new orders flow into the DB automatically. This seed script is now
+// a recovery tool for manual reseeding (e.g. wiped DB, or to backfill
+// orders/evidence created before indexer was running).
+//
 // Reads on-chain records directly (no eth_getLogs — free-tier RPC limits
 // log range to 10 blocks). URIs are hardcoded from the test deploy script
 // since they're not stored on-chain.

@@ -1,10 +1,9 @@
 // Seeds the indexer DB with V3 marketplace orders.
 //
-// Why this exists: the live indexer (catchUp + liveWatch) currently only
-// watches V2 marketplace events. V3 marketplace orders therefore don't
-// appear in the OnChainOrder table by themselves. This one-off seeder
-// reads V3 marketplace state directly via RPC and upserts a matching
-// OnChainOrder row so the frontend can render the order detail page.
+// Now that the indexer covers V3 marketplace events on arbitrumSepolia,
+// new orders flow into the DB automatically. This seed script is now
+// a recovery tool for manual reseeding (e.g. wiped DB, or to backfill
+// orders created before indexer was running).
 //
 // Required env (read from frontend/.env or root .env via tsx):
 //   NEXT_PUBLIC_V3_<NETWORK>_MARKETPLACE_ADDRESS  (e.g. _SEPOLIA_ or _ARBITRUMSEPOLIA_)

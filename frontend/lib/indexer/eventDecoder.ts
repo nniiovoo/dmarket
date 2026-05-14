@@ -1,7 +1,7 @@
 import type { Abi, Log } from "viem";
 import { decodeEventLog, type Address } from "viem";
 
-import escrowMarketplaceV2AbiJson from "../../abi/EscrowMarketplaceV2.json";
+import escrowMarketplaceV3AbiJson from "../../abi/EscrowMarketplaceV3.json";
 
 export type IndexedLog = Log & {
   blockNumber: bigint;
@@ -35,7 +35,7 @@ type EventBase<TKind extends string> = {
 
 type EventArgs = Record<string, unknown>;
 
-const escrowMarketplaceV2Abi = escrowMarketplaceV2AbiJson as Abi;
+const escrowMarketplaceAbi = escrowMarketplaceV3AbiJson as Abi;
 
 export function decodeLogs(logs: IndexedLog[], blockTimestampByNumber: Map<bigint, bigint>) {
   const decoded: DecodedEvent[] = [];
@@ -74,7 +74,7 @@ function decodeIndexerLog(log: IndexedLog, blockTimestamp: bigint | undefined): 
 
   try {
     const decoded = decodeEventLog({
-      abi: escrowMarketplaceV2Abi,
+      abi: escrowMarketplaceAbi,
       data: log.data,
       topics: log.topics
     });

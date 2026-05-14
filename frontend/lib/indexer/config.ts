@@ -26,8 +26,9 @@ export const INDEXED_CHAIN_IDS = ALL_CANDIDATE_CHAINS.filter(chainHasV3Configure
 export const DEPLOYMENT_BLOCK: Record<number, bigint> = {
   [sepolia.id]: 10835467n,
   [polygonAmoy.id]: 38206485n,
-  // Placeholder — fill in once V3 is deployed to Arbitrum Sepolia.
-  [arbitrumSepolia.id]: 0n
+  // V3 marketplace deploy tx is around 268217354; start slightly before it
+  // so catch-up sees the first lifecycle events without scanning genesis.
+  [arbitrumSepolia.id]: 268217000n
 };
 
 export const INDEXER_CHUNK_SIZE_BLOCKS = readPositiveBigIntEnv("INDEXER_CHUNK_SIZE_BLOCKS", 5000n);
@@ -112,7 +113,7 @@ export function getIndexerMarketplaceAddress(chainId: number) {
       (process.env.V3_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS as Address | undefined);
 
     if (!address) {
-      throw new Error("V3 not deployed on Arbitrum Sepolia: set NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS");
+      throw new Error("V3 marketplace not configured on arbitrumSepolia");
     }
 
     return address;
