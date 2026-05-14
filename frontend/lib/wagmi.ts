@@ -1,7 +1,7 @@
 "use client";
 
 import { createConfig, http } from "wagmi";
-import { polygonAmoy, sepolia } from "wagmi/chains";
+import { arbitrumSepolia, polygonAmoy, sepolia } from "wagmi/chains";
 import { injected, walletConnect } from "wagmi/connectors";
 
 import { supportedChains } from "@/lib/chains";
@@ -30,6 +30,7 @@ export const wagmiConfig = createConfig({
   ssr: true,
   transports: {
     [sepolia.id]: http(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || undefined),
-    [polygonAmoy.id]: http(process.env.NEXT_PUBLIC_AMOY_RPC_URL || undefined)
+    [polygonAmoy.id]: http(process.env.NEXT_PUBLIC_AMOY_RPC_URL || undefined),
+    [arbitrumSepolia.id]: http(process.env.NEXT_PUBLIC_ARBITRUM_SEPOLIA_RPC_URL || undefined)
   }
 });

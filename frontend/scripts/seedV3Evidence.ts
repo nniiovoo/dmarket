@@ -4,14 +4,37 @@
 // log range to 10 blocks). URIs are hardcoded from the test deploy script
 // since they're not stored on-chain.
 //
-// Usage: cd frontend && npx tsx scripts/seedV3SepoliaEvidence.ts
+// Usage:
+//   cd frontend && npx tsx scripts/seedV3Evidence.ts                  # defaults to sepolia
+//   SEED_CHAIN=arbitrumSepolia npx tsx scripts/seedV3Evidence.ts
+//   npx tsx scripts/seedV3Evidence.ts --chain arbitrumSepolia 1 2
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { createPublicClient, http, type Address } from "viem";
-import { sepolia } from "viem/chains";
+import { createPublicClient, http, type Address, type Chain } from "viem";
+import { arbitrumSepolia, sepolia } from "viem/chains";
 import { PrismaClient } from "@prisma/client";
 import evidenceRegistryV3AbiJson from "../abi/EvidenceRegistryV3.json" with { type: "json" };
+
+const SUPPORTED: Record<string, { chain: Chain; envPrefix: string; rpcEnv: string }> = {
+  sepolia: { chain: sepolia, envPrefix: "SEPOLIA", rpcEnv: "SEPOLIA_RPC_URL" },
+  arbitrumSepolia: { chain: arbitrumSepolia, envPrefix: "ARBITRUMSEPOLIA", rpcEnv: "ARBITRUM_SEPOLIA_RPC_URL" }
+};
+
+function parseArgs() {
+  const argv = process.argv.slice(2);
+  let chainName = process.env.SEED_CHAIN ?? "sepolia";
+  const orderArgs: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--chain") {
+      chainName = argv[i + 1] ?? chainName;
+      i++;
+    } else {
+      orderArgs.push(argv[i]!);
+    }
+  }
+  return { chainName, orderArgs };
+}
 
 function loadEnv() {
   for (const file of [".env", ".env.local"]) {
@@ -45,21 +68,29 @@ const KNOWN_URIS: Record<string, Record<number, string>> = {
 };
 
 async function main() {
-  const registryAddr = process.env.NEXT_PUBLIC_V3_SEPOLIA_EVIDENCE_REGISTRY_ADDRESS as Address | undefined;
-  const rpc = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || process.env.SEPOLIA_RPC_URL;
-  if (!registryAddr) throw new Error("Missing NEXT_PUBLIC_V3_SEPOLIA_EVIDENCE_REGISTRY_ADDRESS");
-  if (!rpc) throw new Error("Missing SEPOLIA_RPC_URL");
+  const { chainName, orderArgs } = parseArgs();
+  const cfg = SUPPORTED[chainName];
+  if (!cfg) {
+    throw new Error(`Unsupported chain: ${chainName}. Supported: ${Object.keys(SUPPORTED).join(", ")}`);
+  }
 
-  const argv = process.argv.slice(2);
-  const orderIds = (argv.length > 0 ? argv : ["1", "2", "3"]).map((s) => BigInt(s));
+  const registryAddr =
+    (process.env[`NEXT_PUBLIC_V3_${cfg.envPrefix}_EVIDENCE_REGISTRY_ADDRESS`] as Address | undefined) ??
+    (process.env[`V3_${cfg.envPrefix}_EVIDENCE_REGISTRY_ADDRESS`] as Address | undefined);
+  const rpc = process.env[`NEXT_PUBLIC_${cfg.rpcEnv}`] ?? process.env[cfg.rpcEnv];
+  if (!registryAddr) throw new Error(`Missing NEXT_PUBLIC_V3_${cfg.envPrefix}_EVIDENCE_REGISTRY_ADDRESS`);
+  if (!rpc) throw new Error(`Missing ${cfg.rpcEnv}`);
+
+  const orderIds = (orderArgs.length > 0 ? orderArgs : ["1", "2", "3"]).map((s) => BigInt(s));
 
   console.log("Seeding V3 evidence into DB (on-chain reads only)");
+  console.log(`  chain:    ${chainName}`);
   console.log(`  registry: ${registryAddr}`);
   console.log(`  orderIds: ${orderIds.join(", ")}`);
 
-  const client = createPublicClient({ chain: sepolia, transport: http(rpc) });
+  const client = createPublicClient({ chain: cfg.chain, transport: http(rpc) });
   const prisma = new PrismaClient();
-  const chainId = sepolia.id;
+  const chainId = cfg.chain.id;
   const now = new Date();
 
   for (const orderId of orderIds) {

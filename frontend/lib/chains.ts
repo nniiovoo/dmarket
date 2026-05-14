@@ -1,15 +1,17 @@
-import { polygonAmoy, sepolia } from "wagmi/chains";
+import { arbitrumSepolia, polygonAmoy, sepolia } from "wagmi/chains";
 
-export const supportedChains = [sepolia, polygonAmoy] as const;
+export const supportedChains = [sepolia, polygonAmoy, arbitrumSepolia] as const;
 
 export const explorerByChainId: Record<number, string> = {
   [sepolia.id]: "https://sepolia.etherscan.io",
-  [polygonAmoy.id]: "https://amoy.polygonscan.com"
+  [polygonAmoy.id]: "https://amoy.polygonscan.com",
+  [arbitrumSepolia.id]: "https://sepolia.arbiscan.io"
 };
 
 export const faucetByChainId: Record<number, string> = {
   [sepolia.id]: "https://cloud.google.com/application/web3/faucet/ethereum/sepolia",
-  [polygonAmoy.id]: "https://faucet.polygon.technology/"
+  [polygonAmoy.id]: "https://faucet.polygon.technology/",
+  [arbitrumSepolia.id]: "https://www.alchemy.com/faucets/arbitrum-sepolia"
 };
 
 export function getExplorerTxUrl(chainId: number | undefined, txHash: string | undefined) {

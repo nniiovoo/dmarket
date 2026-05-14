@@ -51,6 +51,15 @@ const NETWORK_CONFIG: Record<
       "https://01.functions-gateway.testnet.chain.link/",
       "https://02.functions-gateway.testnet.chain.link/"
     ]
+  },
+  arbitrumSepolia: {
+    routerAddress: "0x234a5fb5Bd614a7AA2FfAB244D603abFA0Ac5C5C",
+    donId: "fun-arbitrum-sepolia-1",
+    donIdBytes32: "0x66756e2d617262697472756d2d7365706f6c69612d3100000000000000000000",
+    gatewayUrls: [
+      "https://01.functions-gateway.testnet.chain.link/",
+      "https://02.functions-gateway.testnet.chain.link/"
+    ]
   }
 };
 
@@ -135,7 +144,12 @@ async function main() {
   const requireCJS = createRequire(import.meta.url);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ethersV5: any = requireCJS("@chainlink/functions-toolkit/node_modules/ethers");
-  const rpcUrl = requireEnv(connection.networkName === "sepolia" ? "SEPOLIA_RPC_URL" : "AMOY_RPC_URL");
+  const rpcEnvName: Record<string, string> = {
+    sepolia: "SEPOLIA_RPC_URL",
+    amoy: "AMOY_RPC_URL",
+    arbitrumSepolia: "ARBITRUM_SEPOLIA_RPC_URL"
+  };
+  const rpcUrl = requireEnv(rpcEnvName[connection.networkName] ?? "SEPOLIA_RPC_URL");
   const v5Provider = new ethersV5.providers.JsonRpcProvider(rpcUrl);
   const v5Wallet = new ethersV5.Wallet(requireEnv("PRIVATE_KEY"), v5Provider);
 
@@ -209,9 +223,14 @@ async function main() {
   console.log("Setting encrypted secrets reference...");
   await (await marketplace.setEncryptedSecretsReference(secretsReference)).wait();
 
+  const dashboardSlug: Record<string, string> = {
+    sepolia: "sepolia",
+    amoy: "polygon-amoy",
+    arbitrumSepolia: "arbitrum-sepolia"
+  };
   console.log("\nDone. Don't forget to add the marketplace as a consumer of subscription",
     subscriptionId.toString(),
-    "at https://functions.chain.link/" + (connection.networkName === "sepolia" ? "sepolia" : "polygon-amoy"));
+    "at https://functions.chain.link/" + (dashboardSlug[connection.networkName] ?? "sepolia"));
 
   await connection.close();
 }

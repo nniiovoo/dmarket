@@ -3,15 +3,31 @@ import { join } from "node:path";
 
 import type { Address, Chain } from "viem";
 import { createPublicClient, http } from "viem";
-import { polygonAmoy, sepolia } from "viem/chains";
+import { arbitrumSepolia, polygonAmoy, sepolia } from "viem/chains";
 
 loadIndexerEnv();
 
-export const INDEXED_CHAIN_IDS = [sepolia.id, polygonAmoy.id] as const;
+// Chains the indexer should watch. Arbitrum Sepolia is V3-only; it only
+// joins the indexed set when its V3 marketplace address is configured,
+// otherwise the indexer skips it silently rather than throwing on startup.
+function chainHasV3Configured(chainId: number): boolean {
+  if (chainId === arbitrumSepolia.id) {
+    return Boolean(
+      process.env.NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS ??
+        process.env.V3_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS
+    );
+  }
+  return true;
+}
+
+const ALL_CANDIDATE_CHAINS = [sepolia.id, polygonAmoy.id, arbitrumSepolia.id] as const;
+export const INDEXED_CHAIN_IDS = ALL_CANDIDATE_CHAINS.filter(chainHasV3Configured) as readonly number[];
 
 export const DEPLOYMENT_BLOCK: Record<number, bigint> = {
   [sepolia.id]: 10835467n,
-  [polygonAmoy.id]: 38206485n
+  [polygonAmoy.id]: 38206485n,
+  // Placeholder — fill in once V3 is deployed to Arbitrum Sepolia.
+  [arbitrumSepolia.id]: 0n
 };
 
 export const INDEXER_CHUNK_SIZE_BLOCKS = readPositiveBigIntEnv("INDEXER_CHUNK_SIZE_BLOCKS", 5000n);
@@ -21,11 +37,15 @@ export const INDEXER_REQUEST_DELAY_MS = readNonNegativeNumberEnv("INDEXER_REQUES
 const fallbackAddresses: Record<number, Address> = {
   [sepolia.id]: "0x3d08d1549aBD309a124a3C77CbE8bCc39a0eB366",
   [polygonAmoy.id]: "0xC8141a88633fa08121E6B9244e5d1Ad1a441FcfD"
+  // Note: no Arbitrum Sepolia fallback — V2 is not deployed there. The
+  // arbitrumSepolia branch in getIndexerMarketplaceAddress reads V3 env vars
+  // and throws if they're missing.
 };
 
 const chainsById: Record<number, Chain> = {
   [sepolia.id]: sepolia,
-  [polygonAmoy.id]: polygonAmoy
+  [polygonAmoy.id]: polygonAmoy,
+  [arbitrumSepolia.id]: arbitrumSepolia
 };
 
 export function loadIndexerEnv() {
@@ -83,6 +103,21 @@ export function getIndexerMarketplaceAddress(chainId: number) {
     );
   }
 
+  if (chainId === arbitrumSepolia.id) {
+    // Arbitrum Sepolia is V3-only; V2 doesn't exist there. Read from V3
+    // env vars (NEXT_PUBLIC_ takes precedence so the same code path works
+    // on both indexer worker and Next.js server-side).
+    const address =
+      (process.env.NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS as Address | undefined) ??
+      (process.env.V3_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS as Address | undefined);
+
+    if (!address) {
+      throw new Error("V3 not deployed on Arbitrum Sepolia: set NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS");
+    }
+
+    return address;
+  }
+
   throw new Error(`Unsupported indexer chain: ${chainId}`);
 }
 
@@ -98,6 +133,13 @@ export function getIndexerEvidenceRegistryAddress(chainId: number): Address | un
     return (
       (process.env.NEXT_PUBLIC_V3_AMOY_EVIDENCE_REGISTRY_ADDRESS as Address | undefined) ??
       (process.env.V3_AMOY_EVIDENCE_REGISTRY_ADDRESS as Address | undefined)
+    );
+  }
+
+  if (chainId === arbitrumSepolia.id) {
+    return (
+      (process.env.NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_EVIDENCE_REGISTRY_ADDRESS as Address | undefined) ??
+      (process.env.V3_ARBITRUMSEPOLIA_EVIDENCE_REGISTRY_ADDRESS as Address | undefined)
     );
   }
 
@@ -121,6 +163,10 @@ function getRpcUrl(chainId: number) {
 
   if (chainId === polygonAmoy.id) {
     return process.env.NEXT_PUBLIC_AMOY_RPC_URL ?? process.env.AMOY_RPC_URL;
+  }
+
+  if (chainId === arbitrumSepolia.id) {
+    return process.env.NEXT_PUBLIC_ARBITRUM_SEPOLIA_RPC_URL ?? process.env.ARBITRUM_SEPOLIA_RPC_URL;
   }
 
   return undefined;

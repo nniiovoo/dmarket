@@ -1,5 +1,5 @@
 import type { Abi, Address } from "viem";
-import { polygonAmoy, sepolia } from "wagmi/chains";
+import { arbitrumSepolia, polygonAmoy, sepolia } from "wagmi/chains";
 
 import escrowMarketplaceV2AbiJson from "@/abi/EscrowMarketplaceV2.json";
 import escrowVaultAbiJson from "@/abi/EscrowVault.json";
@@ -86,6 +86,17 @@ export function getV3ContractAddresses(chainId: number | undefined): V3ContractA
       marketplace,
       vault,
       evidenceRegistry: process.env.NEXT_PUBLIC_V3_AMOY_EVIDENCE_REGISTRY_ADDRESS as Address | undefined
+    };
+  }
+
+  if (chainId === arbitrumSepolia.id) {
+    const marketplace = process.env.NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS as Address | undefined;
+    const vault = process.env.NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_VAULT_ADDRESS as Address | undefined;
+    if (!marketplace || !vault) return undefined;
+    return {
+      marketplace,
+      vault,
+      evidenceRegistry: process.env.NEXT_PUBLIC_V3_ARBITRUMSEPOLIA_EVIDENCE_REGISTRY_ADDRESS as Address | undefined
     };
   }
 

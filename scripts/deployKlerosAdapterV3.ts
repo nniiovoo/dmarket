@@ -43,27 +43,46 @@ async function main() {
   console.log(`  deployer:       ${await deployer.getAddress()}`);
   console.log(`  marketplace:    ${marketplaceAddress}`);
 
-  // Resolve arbitrator — either env override or fresh Mock deployment.
+  // Resolve arbitrator — either env override, a known real Kleros deployment,
+  // or fresh Mock deployment.
+  //
+  // KNOWN_REAL_KLEROS pins chains where the real Kleros V2 court already
+  // exists. On those chains we must NEVER fall through to the Mock, even if
+  // the env var is missing — otherwise a Mock could accidentally bind itself
+  // as the arbitrator on a chain where users expect real jurors.
+  const KNOWN_REAL_KLEROS: Record<string, string> = {
+    arbitrumSepolia: "0xE8442307d36e9bf6aB27F1A009F95CE8E11C3479"
+  };
+
   let arbitratorAddress = process.env[`KLEROS_ARBITRATOR_${upper}_ADDRESS`];
 
   if (!arbitratorAddress) {
-    console.log("\n[1/2] No KLEROS_ARBITRATOR_*_ADDRESS env — deploying MockArbitratorV2 as test stand-in...");
-    const mock = await ethers.deployContract("MockArbitratorV2", [], deployer);
-    const deployTx = mock.deploymentTransaction();
-    await mock.waitForDeployment();
-    arbitratorAddress = await mock.getAddress();
-    console.log(`      MockArbitratorV2 deployed: ${arbitratorAddress}`);
-    console.log(`      deploy tx: ${deployTx?.hash}`);
+    if (KNOWN_REAL_KLEROS[networkName]) {
+      arbitratorAddress = KNOWN_REAL_KLEROS[networkName];
+      console.log(`\n[1/2] Using real Kleros V2 KlerosCore at ${arbitratorAddress}`);
+    } else {
+      console.log("\n[1/2] No KLEROS_ARBITRATOR_*_ADDRESS env — deploying MockArbitratorV2 as test stand-in...");
+      const mock = await ethers.deployContract("MockArbitratorV2", [], deployer);
+      const deployTx = mock.deploymentTransaction();
+      await mock.waitForDeployment();
+      arbitratorAddress = await mock.getAddress();
+      console.log(`      MockArbitratorV2 deployed: ${arbitratorAddress}`);
+      console.log(`      deploy tx: ${deployTx?.hash}`);
+    }
   } else {
     console.log(`\n[1/2] Using existing arbitrator: ${arbitratorAddress}`);
   }
 
   // ExtraData encoding for Kleros V2: (uint96 courtID, uint256 minJurors).
   // For MockArbitratorV2 it's ignored — pass empty bytes.
-  // For real Kleros, owner can update later via setArbitratorExtraData.
-  const arbitratorExtraData = "0x";
+  // For real Kleros on Arbitrum Sepolia, default to General Court (1) + 3
+  // jurors. Owner can swap later via setArbitratorExtraData.
+  const arbitratorExtraData =
+    networkName === "arbitrumSepolia"
+      ? ethers.AbiCoder.defaultAbiCoder().encode(["uint96", "uint256"], [1n, 3n])
+      : "0x";
 
-  // Template ID: 0 for now (mock); for real Kleros, register a template via
+  // Template ID: 0 for Mock; for real Kleros, register a template via
   // Kleros's TemplateRegistry first and set the ID via setTemplateId().
   const templateId = 0n;
 

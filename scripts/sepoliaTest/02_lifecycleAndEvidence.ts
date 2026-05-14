@@ -40,9 +40,10 @@ async function main() {
   const connection = await network.create();
   const { ethers } = connection;
 
-  const vaultAddr = requireEnv("V3_SEPOLIA_VAULT_ADDRESS");
-  const marketplaceAddr = requireEnv("V3_SEPOLIA_MARKETPLACE_ADDRESS");
-  const registryAddr = requireEnv("V3_SEPOLIA_EVIDENCE_REGISTRY_ADDRESS");
+  const upper = connection.networkName.toUpperCase();
+  const vaultAddr = requireEnv(`V3_${upper}_VAULT_ADDRESS`);
+  const marketplaceAddr = requireEnv(`V3_${upper}_MARKETPLACE_ADDRESS`);
+  const registryAddr = requireEnv(`V3_${upper}_EVIDENCE_REGISTRY_ADDRESS`);
   const sellerKey = requireEnv("SELLER_PRIVATE_KEY");
 
   const [buyer] = await ethers.getSigners();
@@ -221,7 +222,13 @@ async function main() {
     console.log(`    - 17track marked the tracking as 'not registered' → JS throws err`);
     console.log(`      → contract emits OracleQueryFailed, oracleResults stays empty`);
     console.log(`    - Or LINK subscription depleted`);
-    console.log(`  Check https://functions.chain.link/sepolia/${process.env.FUNCTIONS_SUBSCRIPTION_ID}`);
+    const dashboardSlug: Record<string, string> = {
+      sepolia: "sepolia",
+      amoy: "polygon-amoy",
+      arbitrumSepolia: "arbitrum-sepolia"
+    };
+    const slug = dashboardSlug[connection.networkName] ?? "sepolia";
+    console.log(`  Check https://functions.chain.link/${slug}/${process.env.FUNCTIONS_SUBSCRIPTION_ID}`);
     console.log(`  for request history.`);
   }
 

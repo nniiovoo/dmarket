@@ -49,14 +49,27 @@ function assertNonZero(label: string, value: string | bigint, hint?: string) {
   }
 }
 
+// Chainlink Functions router per network. Keep in sync with
+// scripts/configureV3Functions.ts and scripts/deployV3.ts.
+const FUNCTIONS_ROUTER: Record<string, string> = {
+  sepolia: "0xb83E47C2bC239B3bf370bc41e1459A34b41238D0",
+  amoy: "0xC22a79eBA640940ABB6dF0f7982cc119578E11De",
+  arbitrumSepolia: "0x234a5fb5Bd614a7AA2FfAB244D603abFA0Ac5C5C"
+};
+
 async function main() {
   const connection = await network.create();
   const { ethers } = connection;
+  const upper = connection.networkName.toUpperCase();
 
-  const vaultAddr = requireEnv("V3_SEPOLIA_VAULT_ADDRESS");
-  const marketplaceAddr = requireEnv("V3_SEPOLIA_MARKETPLACE_ADDRESS");
-  const registryAddr = requireEnv("V3_SEPOLIA_EVIDENCE_REGISTRY_ADDRESS");
+  const vaultAddr = requireEnv(`V3_${upper}_VAULT_ADDRESS`);
+  const marketplaceAddr = requireEnv(`V3_${upper}_MARKETPLACE_ADDRESS`);
+  const registryAddr = requireEnv(`V3_${upper}_EVIDENCE_REGISTRY_ADDRESS`);
   const expectedSubId = BigInt(requireEnv("FUNCTIONS_SUBSCRIPTION_ID"));
+  const expectedRouter = FUNCTIONS_ROUTER[connection.networkName];
+  if (!expectedRouter) {
+    throw new Error(`No Chainlink Functions router configured for network ${connection.networkName}`);
+  }
 
   const [signer] = await ethers.getSigners();
   if (!signer) throw new Error("No signer");
@@ -82,7 +95,7 @@ async function main() {
 
   console.log("\n[2/6] Marketplace wiring");
   assertEq("marketplace.vault", await marketplace.vault(), vaultAddr);
-  assertEq("marketplace.functionsRouter", await marketplace.functionsRouter(), "0xb83E47C2bC239B3bf370bc41e1459A34b41238D0");
+  assertEq("marketplace.functionsRouter", await marketplace.functionsRouter(), expectedRouter);
   assertEq("marketplace.owner", await marketplace.owner(), deployer);
   assertEq("marketplace.pendingOwner", await marketplace.pendingOwner(), "0x0000000000000000000000000000000000000000");
   assertEq("marketplace.nextOrderId (should be 1)", await marketplace.nextOrderId(), 1);
@@ -102,7 +115,7 @@ async function main() {
   assertEq("registry.marketplace", await registry.marketplace(), marketplaceAddr);
 
   console.log("\n[5/6] Registry Chainlink config");
-  assertEq("registry.functionsRouter", await registry.functionsRouter(), "0xb83E47C2bC239B3bf370bc41e1459A34b41238D0");
+  assertEq("registry.functionsRouter", await registry.functionsRouter(), expectedRouter);
   assertEq("registry.owner", await registry.owner(), deployer);
   assertEq("registry.paused", await registry.paused(), false);
   assertEq("registry.subscriptionId", await registry.subscriptionId(), expectedSubId);

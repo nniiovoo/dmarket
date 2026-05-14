@@ -127,3 +127,41 @@ These windows do not protect against a compromised owner *and* compromised
 timelock simultaneously, but they ensure that any drainage attempt has a
 multi-day public footprint that the community (or a separate guardian
 contract, if added later) can react to.
+
+
+## Arbitrum Sepolia Deployment (Kleros V2 testnet)
+
+V3 stack supports Arbitrum Sepolia (chainId 421614) in addition to Ethereum
+Sepolia. The motivation is integration with the real Kleros V2 court — Kleros
+is only deployed on Arbitrum (mainnet + Sepolia testnet) and Gnosis Chain,
+not Ethereum Sepolia.
+
+Required env (root `.env`):
+- `ARBITRUM_SEPOLIA_RPC_URL` — Alchemy / Infura
+- `ARBISCAN_API_KEY` — for contract verification
+- `PRIVATE_KEY` — deployer (different wallet than Sepolia is fine; just needs
+  Arbitrum Sepolia ETH)
+- `FUNCTIONS_SUBSCRIPTION_ID` — **new subscription on Arbitrum Sepolia**
+  (different from Ethereum Sepolia sub ID)
+- `TRACK17_API_KEY` — same value, copy from Sepolia .env
+
+Real Kleros V2 KlerosCore Proxy address:
+`0xE8442307d36e9bf6aB27F1A009F95CE8E11C3479`
+
+Chainlink Functions Router:
+`0x234a5fb5Bd614a7AA2FfAB244D603abFA0Ac5C5C` (DON `fun-arbitrum-sepolia-1`)
+
+Deployment order (same as Sepolia):
+
+1. `deployV3` — vault + marketplace
+2. `addFunctionsConsumer` — register marketplace as Functions consumer
+3. `configureV3Functions` — upload secrets + set subscription / DON
+4. `deployEvidenceRegistryV3`
+5. `addEvidenceRegistryConsumer`
+6. `configureEvidenceRegistryV3`
+7. `wireMarketplaceToEvidenceRegistry`
+8. `deployKlerosAdapterV3` — auto-detects `arbitrumSepolia`, uses the real
+   Kleros V2 KlerosCore (never deploys a Mock there)
+9. `migrateMarketplaceToKlerosAdapter`
+
+All scripts auto-detect the network from the `--network` flag.

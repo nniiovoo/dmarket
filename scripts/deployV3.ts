@@ -4,7 +4,10 @@ import { join } from "node:path";
 
 const FUNCTIONS_ROUTERS: Record<string, string> = {
   sepolia: "0xb83E47C2bC239B3bf370bc41e1459A34b41238D0",
-  amoy: "0xC22a79eBA640940ABB6dF0f7982cc119578E11De"
+  amoy: "0xC22a79eBA640940ABB6dF0f7982cc119578E11De",
+  // Arbitrum Sepolia — verified from
+  // https://docs.chain.link/chainlink-functions/supported-networks
+  arbitrumSepolia: "0x234a5fb5Bd614a7AA2FfAB244D603abFA0Ac5C5C"
 };
 
 async function main() {

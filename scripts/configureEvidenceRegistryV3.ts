@@ -47,6 +47,15 @@ const NETWORK_CONFIG: Record<
       "https://01.functions-gateway.testnet.chain.link/",
       "https://02.functions-gateway.testnet.chain.link/"
     ]
+  },
+  arbitrumSepolia: {
+    routerAddress: "0x234a5fb5Bd614a7AA2FfAB244D603abFA0Ac5C5C",
+    donId: "fun-arbitrum-sepolia-1",
+    donIdBytes32: "0x66756e2d617262697472756d2d7365706f6c69612d3100000000000000000000",
+    gatewayUrls: [
+      "https://01.functions-gateway.testnet.chain.link/",
+      "https://02.functions-gateway.testnet.chain.link/"
+    ]
   }
 };
 
@@ -127,7 +136,12 @@ async function main() {
   const requireCJS = createRequire(import.meta.url);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ethersV5: any = requireCJS("@chainlink/functions-toolkit/node_modules/ethers");
-  const rpcUrl = requireEnv(networkName === "sepolia" ? "SEPOLIA_RPC_URL" : "AMOY_RPC_URL");
+  const rpcEnvName: Record<string, string> = {
+    sepolia: "SEPOLIA_RPC_URL",
+    amoy: "AMOY_RPC_URL",
+    arbitrumSepolia: "ARBITRUM_SEPOLIA_RPC_URL"
+  };
+  const rpcUrl = requireEnv(rpcEnvName[networkName] ?? "SEPOLIA_RPC_URL");
   const v5Provider = new ethersV5.providers.JsonRpcProvider(rpcUrl);
   const v5Wallet = new ethersV5.Wallet(requireEnv("PRIVATE_KEY"), v5Provider);
 

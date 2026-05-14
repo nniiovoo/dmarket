@@ -16,7 +16,11 @@ function getCliNetworkName(): string | undefined {
 
 const selectedNetwork = getCliNetworkName();
 const explorerApiKey =
-  selectedNetwork === "amoy" ? configVariable("POLYGONSCAN_API_KEY") : configVariable("ETHERSCAN_API_KEY");
+  selectedNetwork === "amoy"
+    ? configVariable("POLYGONSCAN_API_KEY")
+    : selectedNetwork === "arbitrumSepolia"
+      ? configVariable("ARBISCAN_API_KEY")
+      : configVariable("ETHERSCAN_API_KEY");
 
 export default defineConfig({
   plugins: [hardhatToolboxMochaEthers],
@@ -49,6 +53,14 @@ export default defineConfig({
       chainType: "generic",
       chainId: 80002,
       url: configVariable("AMOY_RPC_URL"),
+      accounts: [configVariable("PRIVATE_KEY")]
+    },
+    arbitrumSepolia: {
+      type: "http",
+      // Arbitrum is an L2 rollup — Hardhat's "l1" chainType doesn't apply.
+      chainType: "generic",
+      chainId: 421614,
+      url: configVariable("ARBITRUM_SEPOLIA_RPC_URL"),
       accounts: [configVariable("PRIVATE_KEY")]
     }
   },

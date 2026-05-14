@@ -15,7 +15,8 @@ import { network } from "hardhat";
 
 const ROUTER_ADDRESSES: Record<string, string> = {
   sepolia: "0xb83E47C2bC239B3bf370bc41e1459A34b41238D0",
-  amoy: "0xC22a79eBA640940ABB6dF0f7982cc119578E11De"
+  amoy: "0xC22a79eBA640940ABB6dF0f7982cc119578E11De",
+  arbitrumSepolia: "0x234a5fb5Bd614a7AA2FfAB244D603abFA0Ac5C5C"
 };
 
 const ROUTER_ABI = [

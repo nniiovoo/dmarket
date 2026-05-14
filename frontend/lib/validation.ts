@@ -2,7 +2,8 @@ import { z } from "zod";
 
 import { carrierCodes } from "@/lib/carriers";
 
-export const SUPPORTED_CHAIN_IDS = [11155111, 80002] as const;
+// 11155111 = Ethereum Sepolia, 80002 = Polygon Amoy, 421614 = Arbitrum Sepolia.
+export const SUPPORTED_CHAIN_IDS = [11155111, 80002, 421614] as const;
 export const PRODUCT_STATUSES = ["active", "inactive", "sold_out"] as const;
 export const ORDER_STATUSES = ["Created", "Paid", "Shipped", "Completed", "Cancelled", "Disputed", "Refunded"] as const;
 

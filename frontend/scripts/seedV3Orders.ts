@@ -7,22 +7,40 @@
 // OnChainOrder row so the frontend can render the order detail page.
 //
 // Required env (read from frontend/.env or root .env via tsx):
-//   NEXT_PUBLIC_V3_SEPOLIA_MARKETPLACE_ADDRESS
-//   SEPOLIA_RPC_URL or NEXT_PUBLIC_SEPOLIA_RPC_URL
+//   NEXT_PUBLIC_V3_<NETWORK>_MARKETPLACE_ADDRESS  (e.g. _SEPOLIA_ or _ARBITRUMSEPOLIA_)
+//   <NETWORK>_RPC_URL (e.g. SEPOLIA_RPC_URL or ARBITRUM_SEPOLIA_RPC_URL)
 //   DATABASE_URL
 //
 // Usage (from frontend dir):
-//   cd frontend && npx tsx scripts/seedV3SepoliaOrders.ts
+//   cd frontend && npx tsx scripts/seedV3Orders.ts                  # defaults to sepolia
+//   SEED_CHAIN=arbitrumSepolia npx tsx scripts/seedV3Orders.ts
+//   npx tsx scripts/seedV3Orders.ts --chain arbitrumSepolia 1 2 3
 //
-// Optional CLI args: order IDs to seed, defaults to 1,2,3
-//   npx tsx scripts/seedV3SepoliaOrders.ts 1 2 3 4
+// CLI args after --chain (or first non-flag args) are order IDs to seed;
+// default is 1,2,3.
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { createPublicClient, http, type Address } from "viem";
-import { sepolia } from "viem/chains";
+import { createPublicClient, http, type Address, type Chain } from "viem";
+import { arbitrumSepolia, sepolia } from "viem/chains";
 import { PrismaClient } from "@prisma/client";
 import escrowMarketplaceV3AbiJson from "../abi/EscrowMarketplaceV3.json" with { type: "json" };
+
+// Map our network names to viem chains and the env var prefix the deploy
+// scripts use (`V3_<PREFIX>_*`). Keeping this in one table makes adding a
+// new testnet a single-line change.
+const SUPPORTED: Record<string, { chain: Chain; envPrefix: string; rpcEnv: string }> = {
+  sepolia: {
+    chain: sepolia,
+    envPrefix: "SEPOLIA",
+    rpcEnv: "SEPOLIA_RPC_URL"
+  },
+  arbitrumSepolia: {
+    chain: arbitrumSepolia,
+    envPrefix: "ARBITRUMSEPOLIA",
+    rpcEnv: "ARBITRUM_SEPOLIA_RPC_URL"
+  }
+};
 
 // Load .env and .env.local from cwd (frontend/), mirroring Next.js convention.
 function loadEnv() {
@@ -59,28 +77,54 @@ function timestampToDate(sec: bigint): Date | null {
   return sec === 0n ? null : new Date(Number(sec) * 1000);
 }
 
-async function main() {
-  const marketplaceAddr = process.env.NEXT_PUBLIC_V3_SEPOLIA_MARKETPLACE_ADDRESS as Address | undefined;
-  const rpc = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || process.env.SEPOLIA_RPC_URL;
-  if (!marketplaceAddr) throw new Error("Missing NEXT_PUBLIC_V3_SEPOLIA_MARKETPLACE_ADDRESS");
-  if (!rpc) throw new Error("Missing SEPOLIA_RPC_URL");
-
-  // Order IDs from CLI args, defaulting to 1,2,3
+function parseArgs() {
   const argv = process.argv.slice(2);
-  const orderIds = (argv.length > 0 ? argv : ["1", "2", "3"]).map((s) => BigInt(s));
+  let chainName = process.env.SEED_CHAIN ?? "sepolia";
+  const orderArgs: string[] = [];
+
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--chain") {
+      chainName = argv[i + 1] ?? chainName;
+      i++;
+    } else {
+      orderArgs.push(argv[i]!);
+    }
+  }
+
+  return { chainName, orderArgs };
+}
+
+async function main() {
+  const { chainName, orderArgs } = parseArgs();
+  const cfg = SUPPORTED[chainName];
+
+  if (!cfg) {
+    throw new Error(`Unsupported chain: ${chainName}. Supported: ${Object.keys(SUPPORTED).join(", ")}`);
+  }
+
+  const marketplaceAddr =
+    (process.env[`NEXT_PUBLIC_V3_${cfg.envPrefix}_MARKETPLACE_ADDRESS`] as Address | undefined) ??
+    (process.env[`V3_${cfg.envPrefix}_MARKETPLACE_ADDRESS`] as Address | undefined);
+  const rpc =
+    process.env[`NEXT_PUBLIC_${cfg.rpcEnv}`] ?? process.env[cfg.rpcEnv];
+  if (!marketplaceAddr) throw new Error(`Missing NEXT_PUBLIC_V3_${cfg.envPrefix}_MARKETPLACE_ADDRESS`);
+  if (!rpc) throw new Error(`Missing ${cfg.rpcEnv}`);
+
+  const orderIds = (orderArgs.length > 0 ? orderArgs : ["1", "2", "3"]).map((s) => BigInt(s));
 
   console.log("Seeding V3 orders into indexer DB");
+  console.log(`  chain:        ${chainName}`);
   console.log(`  marketplace:  ${marketplaceAddr}`);
   console.log(`  RPC:          ${rpc.slice(0, 40)}...`);
   console.log(`  orderIds:     ${orderIds.join(", ")}`);
 
   const client = createPublicClient({
-    chain: sepolia,
+    chain: cfg.chain,
     transport: http(rpc)
   });
 
   const prisma = new PrismaClient();
-  const chainId = sepolia.id;
+  const chainId = cfg.chain.id;
 
   for (const orderId of orderIds) {
     console.log(`\n→ order ${orderId}`);
