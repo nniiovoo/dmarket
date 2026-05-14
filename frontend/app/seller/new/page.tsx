@@ -3,20 +3,20 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { parseEther } from "viem";
-import { useAccount, useChainId, useSignMessage } from "wagmi";
+import { useAccount, useSignMessage } from "wagmi";
 
 import { Card, EmptyState } from "@/components/Card";
 import { ImageUpload } from "@/components/ImageUpload";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { createProduct } from "@/lib/api/products";
+import { PRIMARY_CHAIN_ID } from "@/lib/chains";
 import { hasMarketplace } from "@/lib/contracts";
 
 export default function NewProductPage() {
   const router = useRouter();
-  const chainId = useChainId();
   const { address, isConnected } = useAccount();
   const { signMessageAsync } = useSignMessage();
-  const supported = hasMarketplace(chainId);
+  const supported = hasMarketplace(PRIMARY_CHAIN_ID);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [priceEth, setPriceEth] = useState("0.0001");
@@ -44,7 +44,7 @@ export default function NewProductPage() {
         name,
         description,
         priceWei: parseEther(priceEth).toString(),
-        chainId,
+        chainId: PRIMARY_CHAIN_ID,
         imageUrl,
         sellerAddress,
         signature,
