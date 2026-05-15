@@ -18,9 +18,16 @@ model Product {
   status        String   @default("active")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  /// Generated tsvector for full-text search. Postgres maintains this
+  /// automatically via GENERATED ALWAYS AS in
+  /// prisma/migrations/manual_product_search.sql — DO NOT write from
+  /// Prisma. Query path is raw SQL only; this field exists in the
+  /// model so Prisma's introspect / generate doesn't drop the column.
+  searchVector  Unsupported("tsvector")?
 
   @@index([sellerAddress])
   @@index([chainId, status])
+  @@index([searchVector], type: Gin)
 }
 
 model OnChainOrder {

@@ -43,6 +43,52 @@ export async function fetchProducts(params: { chainId?: number; seller?: string;
   return parseJson<ProductListResponse>(response);
 }
 
+export type SearchResultRow = {
+  id: number;
+  name: string;
+  description: string;
+  priceWei: string;
+  sellerAddress: string;
+  chainId: number;
+  imageUrl: string;
+  status: string;
+  createdAt: string;
+  relevanceScore: number;
+};
+
+export type SearchProductsResponse = {
+  results: SearchResultRow[];
+  total: number;
+  query: {
+    q: string;
+    priceMaxWei: string | null;
+    priceMinWei: string | null;
+    chainId: number | null;
+    sortBy: "relevance" | "price_asc" | "price_desc" | "recent";
+    limit: number;
+    offset: number;
+  };
+};
+
+export async function searchProductsApi(params: {
+  q?: string;
+  priceMaxWei?: string;
+  priceMinWei?: string;
+  chainId?: number;
+  sortBy?: "relevance" | "price_asc" | "price_desc" | "recent";
+  limit?: number;
+  offset?: number;
+}) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      search.set(key, String(value));
+    }
+  }
+  const response = await fetch(`/api/search/products?${search.toString()}`);
+  return parseJson<SearchProductsResponse>(response);
+}
+
 export async function fetchProduct(id: number) {
   const response = await fetch(`/api/products/${id}`);
   return parseJson<Product>(response);
