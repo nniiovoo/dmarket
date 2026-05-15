@@ -17,6 +17,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { withErrorBoundary } from "@/lib/api/withErrorBoundary";
+import {
+  cacheGet,
+  cacheKeyFor,
+  cacheSet,
+  hashIp,
+  incCacheHit,
+  incRequest,
+  logRequest,
+  recordLatency,
+  type RequestStatus
+} from "@/lib/api/rpcMetrics";
 
 export const dynamic = "force-dynamic";
 
@@ -116,17 +127,43 @@ function rejectBatch() {
 }
 
 export const POST = withErrorBoundary(async (request: NextRequest, context: RouteContext) => {
+  const startedAt = Date.now();
   const { chain } = await context.params;
+  const ip = clientIp(request);
+
+  // Tracks the eventual handler outcome for the structured log + counters.
+  // Defaults are overwritten before any return path the metrics care about.
+  let method = "unknown";
+  let status: RequestStatus = "ok";
+  const finish = (response: NextResponse): NextResponse => {
+    const durationMs = Date.now() - startedAt;
+    incRequest(chain, method, status);
+    logRequest({
+      ts: new Date(startedAt).toISOString(),
+      chain,
+      method,
+      status,
+      durationMs,
+      ip: hashIp(ip)
+    });
+    return response;
+  };
 
   const upstream = upstreamUrlFor(chain);
   if (!upstream) {
-    return NextResponse.json({ error: `Unknown chain segment: ${chain}` }, { status: 404 });
+    status = "bad_request";
+    return finish(
+      NextResponse.json({ error: `Unknown chain segment: ${chain}` }, { status: 404 })
+    );
   }
 
-  if (!checkIpRateLimit(clientIp(request))) {
-    return NextResponse.json(
-      { error: "Too many RPC requests from this IP. Slow down for a minute." },
-      { status: 429 }
+  if (!checkIpRateLimit(ip)) {
+    status = "rate_limited";
+    return finish(
+      NextResponse.json(
+        { error: "Too many RPC requests from this IP. Slow down for a minute." },
+        { status: 429 }
+      )
     );
   }
 
@@ -134,26 +171,47 @@ export const POST = withErrorBoundary(async (request: NextRequest, context: Rout
   try {
     payload = await request.json();
   } catch {
-    return NextResponse.json({ error: "Body must be valid JSON" }, { status: 400 });
+    status = "bad_request";
+    return finish(NextResponse.json({ error: "Body must be valid JSON" }, { status: 400 }));
   }
 
   if (Array.isArray(payload)) {
-    return rejectBatch();
+    status = "bad_request";
+    return finish(rejectBatch());
   }
 
   if (typeof payload !== "object" || payload === null) {
-    return NextResponse.json({ error: "Body must be a JSON-RPC object" }, { status: 400 });
+    status = "bad_request";
+    return finish(
+      NextResponse.json({ error: "Body must be a JSON-RPC object" }, { status: 400 })
+    );
   }
 
   const rpc = payload as JsonRpcRequest;
   if (typeof rpc.method !== "string") {
-    return NextResponse.json({ error: "Missing JSON-RPC method" }, { status: 400 });
+    status = "bad_request";
+    return finish(NextResponse.json({ error: "Missing JSON-RPC method" }, { status: 400 }));
   }
+  method = rpc.method;
   if (!ALLOWED_METHODS.has(rpc.method)) {
-    return NextResponse.json(
-      { error: `Method ${rpc.method} not allowed by proxy.` },
-      { status: 405 }
+    status = "method_not_allowed";
+    return finish(
+      NextResponse.json({ error: `Method ${rpc.method} not allowed by proxy.` }, { status: 405 })
     );
+  }
+
+  // Cache lookup (eth_call / eth_blockNumber only). Cached value is the full
+  // upstream JSON body — re-stamp the id from the current request so the
+  // caller still sees its own id round-tripped.
+  const cacheKey = cacheKeyFor(chain, rpc.method, rpc.params);
+  if (cacheKey) {
+    const cached = cacheGet(cacheKey.key);
+    if (cached && typeof cached === "object") {
+      status = "cache_hit";
+      incCacheHit(chain, rpc.method);
+      const body = { ...(cached as Record<string, unknown>), id: rpc.id ?? null };
+      return finish(NextResponse.json(body, { status: 200 }));
+    }
   }
 
   // Forward. We pin a short timeout so a stuck upstream doesn't tie up the
@@ -162,6 +220,7 @@ export const POST = withErrorBoundary(async (request: NextRequest, context: Rout
   const timeout = setTimeout(() => controller.abort(), 15_000);
 
   let upstreamResponse: Response;
+  const fetchStartedAt = Date.now();
   try {
     upstreamResponse = await fetch(upstream, {
       method: "POST",
@@ -170,15 +229,19 @@ export const POST = withErrorBoundary(async (request: NextRequest, context: Rout
       signal: controller.signal
     });
   } catch (err) {
-    return NextResponse.json(
-      {
-        error: "upstream_unreachable",
-        detail: err instanceof Error ? err.message : String(err)
-      },
-      { status: 502 }
+    status = "upstream_error";
+    return finish(
+      NextResponse.json(
+        {
+          error: "upstream_unreachable",
+          detail: err instanceof Error ? err.message : String(err)
+        },
+        { status: 502 }
+      )
     );
   } finally {
     clearTimeout(timeout);
+    recordLatency(chain, Date.now() - fetchStartedAt);
   }
 
   // Surface upstream JSON as-is. Don't blindly cast to JSON — some 429
@@ -186,19 +249,36 @@ export const POST = withErrorBoundary(async (request: NextRequest, context: Rout
   // diagnostic visible to the client.
   const contentType = upstreamResponse.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
+    status = "upstream_error";
     const text = await upstreamResponse.text();
-    return NextResponse.json(
-      {
-        error: "upstream_non_json",
-        status: upstreamResponse.status,
-        snippet: text.slice(0, 500)
-      },
-      { status: upstreamResponse.status >= 400 ? upstreamResponse.status : 502 }
+    return finish(
+      NextResponse.json(
+        {
+          error: "upstream_non_json",
+          status: upstreamResponse.status,
+          snippet: text.slice(0, 500)
+        },
+        { status: upstreamResponse.status >= 400 ? upstreamResponse.status : 502 }
+      )
     );
   }
 
   const body = await upstreamResponse.json();
-  return NextResponse.json(body, { status: upstreamResponse.status });
+  // Only cache clean successful JSON-RPC results.
+  if (
+    cacheKey &&
+    upstreamResponse.status === 200 &&
+    body &&
+    typeof body === "object" &&
+    "result" in body &&
+    !("error" in body)
+  ) {
+    cacheSet(cacheKey.key, body, cacheKey.ttlMs);
+  }
+  if (upstreamResponse.status >= 400 || (body && typeof body === "object" && "error" in body)) {
+    status = "upstream_error";
+  }
+  return finish(NextResponse.json(body, { status: upstreamResponse.status }));
 });
 
 // GET exists only so a quick browser visit doesn't 404 confusingly during dev.
