@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { withErrorBoundary } from "@/lib/api/withErrorBoundary";
+
 export const dynamic = "force-dynamic";
 
 const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -20,7 +22,7 @@ type ImgbbResponse = {
   success?: boolean;
 };
 
-export async function POST(request: NextRequest) {
+export const POST = withErrorBoundary(async (request: NextRequest) => {
   const apiKey = process.env.IMGBB_API_KEY;
 
   if (!apiKey) {
@@ -75,7 +77,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ url, deleteUrl: data.data?.delete_url });
-}
+});
 
 function checkRateLimit(ip: string) {
   const now = Date.now();

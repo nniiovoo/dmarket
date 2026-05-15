@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
+import { queueNotification } from "../email/send";
 import type { DecodedEvidenceEvent } from "./evidenceEventDecoder";
 
 export async function applyEvidenceEvent(
@@ -12,6 +13,17 @@ export async function applyEvidenceEvent(
 
   if (ev.kind === "EvidenceSubmitted") {
     const submittedAt = timestampToDate(ev.blockTimestamp);
+    // Was this evidence already indexed? Used below to decide whether to
+    // notify — re-indexing the same event (e.g. after a catchUp rerun)
+    // shouldn't spam the recipient.
+    const wasNew =
+      (await prisma.evidence.findUnique({
+        where: {
+          chainId_onChainOrderId_evidenceIndex: { chainId, onChainOrderId, evidenceIndex }
+        },
+        select: { evidenceIndex: true }
+      })) === null;
+
     await prisma.evidence.upsert({
       where: {
         chainId_onChainOrderId_evidenceIndex: {
@@ -42,6 +54,10 @@ export async function applyEvidenceEvent(
         submittedTxHash: ev.txHash
       }
     });
+
+    if (wasNew) {
+      await notifyOtherParty(prisma, chainId, onChainOrderId, ev.party.toLowerCase());
+    }
     return;
   }
 
@@ -119,4 +135,31 @@ export async function applyEvidenceEvent(
 
 function timestampToDate(timestamp: bigint): Date {
   return new Date(Number(timestamp) * 1000);
+}
+
+async function notifyOtherParty(
+  prisma: PrismaClient,
+  chainId: number,
+  onChainOrderId: string,
+  submitterAddress: string
+): Promise<void> {
+  const order = await prisma.onChainOrder.findUnique({
+    where: { chainId_onChainOrderId: { chainId, onChainOrderId } },
+    select: { buyer: true, seller: true }
+  });
+  if (!order) return;
+
+  const buyer = order.buyer.toLowerCase();
+  const seller = order.seller.toLowerCase();
+  const submitter = submitterAddress.toLowerCase();
+
+  if (submitter === buyer) {
+    // Buyer just submitted → tell seller.
+    queueNotification(seller, "EvidenceSubmittedByBuyer", { chainId, onChainOrderId });
+  } else if (submitter === seller) {
+    // Seller just submitted → tell buyer.
+    queueNotification(buyer, "EvidenceSubmittedBySeller", { chainId, onChainOrderId });
+  }
+  // If submitter is neither (shouldn't happen — contract enforces party check),
+  // drop silently.
 }

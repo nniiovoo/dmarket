@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError, z } from "zod";
 
+import { withErrorBoundary } from "@/lib/api/withErrorBoundary";
 import { verifySellerSignature } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { addressSchema, productUpdateSchema } from "@/lib/validation";
@@ -17,7 +18,7 @@ const deleteSchema = z.object({
   signedMessage: z.string()
 });
 
-export async function GET(_request: NextRequest, context: RouteContext) {
+export const GET = withErrorBoundary(async (_request: NextRequest, context: RouteContext) => {
   const id = await getProductId(context);
 
   if (id === undefined) {
@@ -31,9 +32,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   }
 
   return NextResponse.json(product);
-}
+});
 
-export async function PATCH(request: NextRequest, context: RouteContext) {
+export const PATCH = withErrorBoundary(async (request: NextRequest, context: RouteContext) => {
   try {
     const id = await getProductId(context);
 
@@ -85,9 +86,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ error: "Failed to update product" }, { status: 500 });
   }
-}
+});
 
-export async function DELETE(request: NextRequest, context: RouteContext) {
+export const DELETE = withErrorBoundary(async (request: NextRequest, context: RouteContext) => {
   try {
     const id = await getProductId(context);
 
@@ -133,7 +134,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ error: "Failed to delete product" }, { status: 500 });
   }
-}
+});
 
 async function getProductId(context: RouteContext) {
   const params = await context.params;

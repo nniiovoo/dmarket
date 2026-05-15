@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
 
+import { withErrorBoundary } from "@/lib/api/withErrorBoundary";
 import { verifyWalletSignature } from "@/lib/auth";
 import { computeTrackingUrl, type CarrierCode } from "@/lib/carriers";
 import { prisma } from "@/lib/db";
@@ -14,7 +15,7 @@ type RouteContext = {
   params: Promise<{ chainId: string; onChainOrderId: string }>;
 };
 
-export async function PATCH(request: NextRequest, context: RouteContext) {
+export const PATCH = withErrorBoundary(async (request: NextRequest, context: RouteContext) => {
   try {
     const parsedParams = orderDetailParamsSchema.safeParse(await context.params);
 
@@ -102,7 +103,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({ error: "Failed to update shipping" }, { status: 500 });
   }
-}
+});
 
 function validationError(error: ZodError) {
   return NextResponse.json({ error: "Validation failed", details: error.flatten() }, { status: 400 });

@@ -8,15 +8,18 @@ import { useAccount } from "wagmi";
 
 import { NewOrderBadge } from "@/components/seller/NewOrderBadge";
 import { WalletButton } from "@/components/WalletButton";
+import { fetchInboxUnreadCount } from "@/lib/api/inbox";
 import { fetchSellerOrders } from "@/lib/api/seller";
 import { PRIMARY_CHAIN_ID } from "@/lib/chains";
 import { hasMarketplace } from "@/lib/contracts";
+import { useSiweAuth } from "@/lib/useSiweAuth";
 
 const navItems = [
   { href: "/", label: "Home" },
   { href: "/products", label: "Products" },
   { href: "/create", label: "Create Order" },
   { href: "/seller", label: "Seller Dashboard" },
+  { href: "/inbox", label: "Inbox" },
   { href: "/settings", label: "Settings" },
   { href: "/seller/new", label: "Sell" },
   { href: "/admin", label: "Admin" },
@@ -26,6 +29,7 @@ const navItems = [
 export function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { address, isConnected } = useAccount();
+  const siwe = useSiweAuth();
   const seller = address?.toLowerCase();
   const sellerBadgeQuery = useQuery({
     queryKey: ["seller", "orders", seller, PRIMARY_CHAIN_ID, "Paid", "nav"],
@@ -34,7 +38,18 @@ export function AppFrame({ children }: { children: ReactNode }) {
     refetchInterval: 15_000
   });
   const sellerBadgeCount = sellerBadgeQuery.data?.orders.length ?? 0;
-  const connectedOnlyHrefs = new Set(["/seller", "/settings"]);
+
+  // Total unread chat messages across all the user's threads. Only meaningful
+  // once SIWE'd in — the API 401s otherwise, so don't bother polling.
+  const inboxBadgeQuery = useQuery({
+    queryKey: ["inbox", "unread", siwe.sessionAddress ?? ""],
+    queryFn: fetchInboxUnreadCount,
+    enabled: siwe.sessionAddress !== null,
+    refetchInterval: 15_000
+  });
+  const inboxUnreadCount = inboxBadgeQuery.data ?? 0;
+
+  const connectedOnlyHrefs = new Set(["/seller", "/settings", "/inbox"]);
   const visibleNavItems = isConnected ? navItems : navItems.filter((item) => !connectedOnlyHrefs.has(item.href));
 
   return (
@@ -58,8 +73,18 @@ export function AppFrame({ children }: { children: ReactNode }) {
               >
                 {item.label}
                 {item.href === "/seller" ? <NewOrderBadge count={sellerBadgeCount} /> : null}
+                {item.href === "/inbox" ? <NewOrderBadge count={inboxUnreadCount} /> : null}
               </Link>
             ))}
+            {siwe.sessionAddress ? (
+              <button
+                type="button"
+                onClick={() => void siwe.signOut()}
+                className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              >
+                SIWE Logout
+              </button>
+            ) : null}
             <WalletButton />
           </nav>
         </div>

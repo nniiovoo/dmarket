@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
 
+import { withErrorBoundary } from "@/lib/api/withErrorBoundary";
 import { verifyWalletSignature } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { bindEmailSchema, userEmailQuerySchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+export const GET = withErrorBoundary(async (request: NextRequest) => {
   const parsed = userEmailQuerySchema.safeParse(Object.fromEntries(request.nextUrl.searchParams.entries()));
 
   if (!parsed.success) {
@@ -24,9 +25,9 @@ export async function GET(request: NextRequest) {
     maskedEmail: user?.email ? maskEmail(user.email) : null,
     emailVerified: user?.emailVerified ?? false
   });
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = withErrorBoundary(async (request: NextRequest) => {
   try {
     const data = bindEmailSchema.parse(await request.json());
     const auth = await verifyWalletSignature(
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: "Failed to update email" }, { status: 500 });
   }
-}
+});
 
 function maskEmail(email: string) {
   const [local = "", domain = ""] = email.split("@");

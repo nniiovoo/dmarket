@@ -134,21 +134,28 @@ contract EscrowMarketplaceV3 is Ownable2Step, Pausable, ReentrancyGuard, Functio
     }
 
     function createOrder(address seller, uint256 productId, uint256 amount) external whenNotPaused returns (uint256) {
-        return _createOrderInternal(seller, productId, amount);
+        return _createOrderFor(msg.sender, seller, productId, amount);
     }
 
     function createAndPay(address seller, uint256 productId) external payable nonReentrant whenNotPaused returns (uint256) {
         require(msg.value > 0, "Amount must be greater than zero");
 
-        uint256 orderId = _createOrderInternal(seller, productId, msg.value);
-        _payOrderInternal(orderId);
+        uint256 orderId = _createOrderFor(msg.sender, seller, productId, msg.value);
+        _payOrderFor(msg.sender, orderId, msg.value);
 
         return orderId;
     }
 
-    function _createOrderInternal(address seller, uint256 productId, uint256 amount) private returns (uint256) {
+    // Internal so V3.1 (signed-auth payment) can reuse the same logic while
+    // supplying the buyer explicitly (the relayer is msg.sender, not the buyer).
+    function _createOrderFor(
+        address buyer,
+        address seller,
+        uint256 productId,
+        uint256 amount
+    ) internal returns (uint256) {
         require(seller != address(0), "Seller cannot be zero address");
-        require(seller != msg.sender, "Seller cannot be buyer");
+        require(seller != buyer, "Seller cannot be buyer");
         require(amount > 0, "Amount must be greater than zero");
 
         uint256 orderId = nextOrderId;
@@ -156,7 +163,7 @@ contract EscrowMarketplaceV3 is Ownable2Step, Pausable, ReentrancyGuard, Functio
 
         orders[orderId] = Order({
             id: orderId,
-            buyer: msg.sender,
+            buyer: buyer,
             seller: seller,
             productId: productId,
             amount: amount,
@@ -169,31 +176,31 @@ contract EscrowMarketplaceV3 is Ownable2Step, Pausable, ReentrancyGuard, Functio
             disputedAt: 0
         });
 
-        buyerOrders[msg.sender].push(orderId);
+        buyerOrders[buyer].push(orderId);
         sellerOrders[seller].push(orderId);
 
-        emit OrderCreated(orderId, msg.sender, seller, productId, amount);
+        emit OrderCreated(orderId, buyer, seller, productId, amount);
 
         return orderId;
     }
 
     function payOrder(uint256 orderId) external payable nonReentrant whenNotPaused orderExists(orderId) {
-        _payOrderInternal(orderId);
+        _payOrderFor(msg.sender, orderId, msg.value);
     }
 
-    function _payOrderInternal(uint256 orderId) private {
+    function _payOrderFor(address buyer, uint256 orderId, uint256 value) internal {
         Order storage order = orders[orderId];
 
-        require(msg.sender == order.buyer, "Only buyer can pay this order");
+        require(buyer == order.buyer, "Only buyer can pay this order");
         require(order.status == OrderStatus.Created, "Order must be Created");
-        require(msg.value == order.amount, "Payment amount must equal order amount");
+        require(value == order.amount, "Payment amount must equal order amount");
 
         order.status = OrderStatus.Paid;
         order.paidAt = uint64(block.timestamp);
 
-        emit OrderPaid(orderId, msg.sender, msg.value);
+        emit OrderPaid(orderId, buyer, value);
 
-        vault.lockFunds{value: msg.value}(orderId, order.buyer, order.seller);
+        vault.lockFunds{value: value}(orderId, order.buyer, order.seller);
     }
 
     function markShipped(uint256 orderId) external whenNotPaused orderExists(orderId) {

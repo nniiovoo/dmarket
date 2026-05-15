@@ -1,6 +1,9 @@
 import { expect } from "chai";
 import { network } from "hardhat";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+
+const requireRel = createRequire(import.meta.url);
 
 describe("V3 Marketplace (delivery oracle)", function () {
   const AUTO_CONFIRM_DELAY = 10 * 24 * 60 * 60;
@@ -1301,9 +1304,12 @@ describe("V3 Marketplace (delivery oracle)", function () {
       const { ethers, owner, marketplace } = await deploy();
       const [, , , , multisig] = await ethers.getSigners();
 
-      const timelockArtifact = JSON.parse(
-        readFileSync("node_modules/@openzeppelin/contracts/build/contracts/TimelockController.json", "utf8")
+      // Resolve via Node's module resolution so the test works regardless of
+      // the cwd the runner was invoked from (project root vs frontend/).
+      const timelockArtifactPath = requireRel.resolve(
+        "@openzeppelin/contracts/build/contracts/TimelockController.json"
       );
+      const timelockArtifact = JSON.parse(readFileSync(timelockArtifactPath, "utf8"));
       const Timelock = new ethers.ContractFactory(
         timelockArtifact.abi,
         timelockArtifact.bytecode,

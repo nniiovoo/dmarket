@@ -18,3 +18,6 @@ frontend/tsconfig.tsbuildinfo
 
 # Claude Code internal worktrees
 .claude/worktrees/
+
+# Private dispute evidence files (local-FS storage backend).
+frontend/evidence-uploads/

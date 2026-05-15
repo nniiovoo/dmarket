@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { withErrorBoundary } from "@/lib/api/withErrorBoundary";
 import { getOrder } from "@/lib/orders";
 import { orderDetailParamsSchema } from "@/lib/validation";
 
@@ -9,7 +10,7 @@ type RouteContext = {
   params: Promise<{ chainId: string; onChainOrderId: string }>;
 };
 
-export async function GET(_request: NextRequest, context: RouteContext) {
+export const GET = withErrorBoundary(async (_request: NextRequest, context: RouteContext) => {
   const params = await context.params;
   const parsed = orderDetailParamsSchema.safeParse(params);
 
@@ -24,4 +25,4 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   }
 
   return NextResponse.json(order);
-}
+});

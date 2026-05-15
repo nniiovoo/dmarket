@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { withErrorBoundary } from "@/lib/api/withErrorBoundary";
 import { prisma } from "@/lib/db";
 import { fetchTrackingFrom17track } from "@/lib/tracking/17track";
 
@@ -12,7 +13,7 @@ type RouteContext = {
   params: Promise<{ chainId: string; onChainOrderId: string }>;
 };
 
-export async function GET(_request: NextRequest, context: RouteContext) {
+export const GET = withErrorBoundary(async (_request: NextRequest, context: RouteContext) => {
   try {
     const params = await context.params;
     const chainId = Number(params.chainId);
@@ -109,7 +110,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     console.error("[tracking] handler error:", error);
     return NextResponse.json({ error: "Failed to load tracking" }, { status: 500 });
   }
-}
+});
 
 function serializeSnapshot(snapshot: {
   trackingNumber: string;

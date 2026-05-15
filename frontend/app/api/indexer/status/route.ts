@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createPublicClient, http } from "viem";
 import { polygonAmoy, sepolia } from "viem/chains";
 
+import { withErrorBoundary } from "@/lib/api/withErrorBoundary";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ const indexedChains = [
   { id: polygonAmoy.id, chain: polygonAmoy, rpcUrl: process.env.NEXT_PUBLIC_AMOY_RPC_URL ?? process.env.AMOY_RPC_URL }
 ] as const;
 
-export async function GET() {
+export const GET = withErrorBoundary(async () => {
   const chainStatuses = await Promise.all(
     indexedChains.map(async ({ id: chainId, chain, rpcUrl }) => {
       try {
@@ -44,4 +45,4 @@ export async function GET() {
   );
 
   return NextResponse.json({ chains: chainStatuses });
-}
+});

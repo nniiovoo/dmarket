@@ -1,10 +1,19 @@
 import { formatEther } from "viem";
 
+import { getExplorerTxUrl } from "@/lib/chains";
 import { appBaseUrl } from "@/lib/email/client";
 import type { ApiOrder } from "@/lib/orders";
 import { carrierName } from "@/lib/carriers";
 
-export type NotificationKind = "OrderPaid" | "OrderShipped" | "OrderCompleted" | "OrderDisputed" | "OrderRefunded";
+export type NotificationKind =
+  | "OrderPaid"
+  | "OrderShipped"
+  | "OrderCompleted"
+  | "OrderDisputed"
+  | "OrderRefunded"
+  | "EvidenceSubmittedByBuyer"
+  | "EvidenceSubmittedBySeller"
+  | "NewChatMessage";
 
 export type NotificationTemplate = {
   subject: string;
@@ -14,11 +23,17 @@ export type NotificationTemplate = {
 
 export function renderNotification(kind: NotificationKind, order: ApiOrder): NotificationTemplate {
   const productName = order.product?.name ?? `Product #${order.productId}`;
-  const orderUrl = `${appBaseUrl()}/orders/${order.onChainOrderId}?chainId=${order.chainId}`;
+  // V3 lives at /orders, V3.1 at /v3_1/orders. We deliberately keep the
+  // human-facing subject/body identical so users don't learn (or care)
+  // about the marketplace version distinction.
+  const orderPath = order.marketplaceVersion === "v3.1" ? "/v3_1/orders" : "/orders";
+  const orderUrl = `${appBaseUrl()}${orderPath}/${order.onChainOrderId}?chainId=${order.chainId}`;
+  const explorerUrl = getExplorerTxUrl(order.chainId, order.lastTxHash ?? undefined);
   const amount = safeFormatEther(order.amountWei);
   const common = {
     productName,
     orderUrl,
+    explorerUrl,
     amount,
     order
   };
@@ -60,6 +75,31 @@ export function renderNotification(kind: NotificationKind, order: ApiOrder): Not
         intro: `订单 #${order.onChainOrderId} 已退款给买家。`,
         ...common
       });
+    case "EvidenceSubmittedByBuyer":
+      return buildTemplate({
+        title: "买家提交了新证据",
+        subject: "「ChainUs」买家提交了新证据",
+        intro: `订单 #${order.onChainOrderId} 的买家在争议中提交了新证据。请尽快查看并回应。`,
+        ...common
+      });
+    case "EvidenceSubmittedBySeller":
+      return buildTemplate({
+        title: "卖家提交了新证据",
+        subject: "「ChainUs」卖家提交了新证据",
+        intro: `订单 #${order.onChainOrderId} 的卖家在争议中提交了新证据。请尽快查看并回应。`,
+        ...common
+      });
+    case "NewChatMessage":
+      // Deliberately omit the message body and sender address from the
+      // email — the chat is private to the two parties and the email is a
+      // best-effort nudge, not a transcript. The recipient clicks through
+      // to the dapp to see what was said.
+      return buildTemplate({
+        title: "对方在订单中给你发了新消息",
+        subject: "「ChainUs」对方在订单中给你发了新消息",
+        intro: `订单 #${order.onChainOrderId} 中对方刚给你发了一条消息，点击查看并回复。`,
+        ...common
+      });
   }
 }
 
@@ -69,6 +109,7 @@ function buildTemplate({
   intro,
   productName,
   orderUrl,
+  explorerUrl,
   amount,
   order,
   shipping = false
@@ -78,6 +119,7 @@ function buildTemplate({
   intro: string;
   productName: string;
   orderUrl: string;
+  explorerUrl: string | undefined;
   amount: string;
   order: ApiOrder;
   shipping?: boolean;
@@ -112,7 +154,12 @@ function buildTemplate({
               </td>
             </tr>
             <tr><td style="padding-top:20px;"><a href="${escapeAttribute(orderUrl)}" style="display:inline-block;background:#0f172a;color:white;text-decoration:none;border-radius:6px;padding:10px 14px;">查看订单详情</a></td></tr>
-            <tr><td><p style="margin:20px 0 0;color:#64748b;font-size:12px;">你可以在 Settings 中移除或更新通知邮箱。</p></td></tr>
+            ${
+              explorerUrl
+                ? `<tr><td style="padding-top:12px;"><a href="${escapeAttribute(explorerUrl)}" style="color:#1d4ed8;text-decoration:underline;font-size:13px;">在区块浏览器验证链上状态</a></td></tr>`
+                : ""
+            }
+            <tr><td><p style="margin:20px 0 0;color:#64748b;font-size:12px;">邮件仅供参考，请始终以链上状态为准。你可以在 Settings 中移除或更新通知邮箱。</p></td></tr>
           </table>
         </td>
       </tr>
@@ -122,10 +169,12 @@ function buildTemplate({
     ? `\n承运商：${carrierName(order.carrier)}\n物流单号：${order.trackingNumber ?? "卖家未提供物流信息"}\n追踪链接：${order.trackingUrl ?? "-"}`
     : "";
 
+  const explorerText = explorerUrl ? `\n链上验证：${explorerUrl}` : "";
+
   return {
     subject,
     html,
-    text: `${title}\n\n${intro}\n订单号：#${order.onChainOrderId}\n商品：${productName}\n金额：${amount} ETH / MATIC\n状态：${order.status}${shippingText}\n\n订单详情：${orderUrl}`
+    text: `${title}\n\n${intro}\n订单号：#${order.onChainOrderId}\n商品：${productName}\n金额：${amount} ETH / MATIC\n状态：${order.status}${shippingText}\n\n订单详情：${orderUrl}${explorerText}\n\n邮件仅供参考，请始终以链上状态为准。`
   };
 }
 

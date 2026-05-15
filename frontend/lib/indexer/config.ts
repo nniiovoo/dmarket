@@ -23,6 +23,21 @@ function chainHasV3Configured(chainId: number): boolean {
 const ALL_CANDIDATE_CHAINS = [sepolia.id, polygonAmoy.id, arbitrumSepolia.id] as const;
 export const INDEXED_CHAIN_IDS = ALL_CANDIDATE_CHAINS.filter(chainHasV3Configured) as readonly number[];
 
+// Chains the V3.1 indexer should watch. Currently V3.1 only exists on
+// Arbitrum Sepolia, and only if its marketplace env is configured.
+function chainHasV3_1Configured(chainId: number): boolean {
+  if (chainId === arbitrumSepolia.id) {
+    return Boolean(
+      process.env.NEXT_PUBLIC_V3_1_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS ??
+        process.env.V3_1_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS
+    );
+  }
+  return false;
+}
+
+const ALL_CANDIDATE_V3_1_CHAINS = [arbitrumSepolia.id] as const;
+export const INDEXED_V3_1_CHAIN_IDS = ALL_CANDIDATE_V3_1_CHAINS.filter(chainHasV3_1Configured) as readonly number[];
+
 export const DEPLOYMENT_BLOCK: Record<number, bigint> = {
   [sepolia.id]: 10835467n,
   [polygonAmoy.id]: 38206485n,
@@ -33,6 +48,14 @@ export const DEPLOYMENT_BLOCK: Record<number, bigint> = {
   // when starting indexer fresh). Default below covers from-deploy in case
   // a paid RPC is used.
   [arbitrumSepolia.id]: readPositiveBigIntEnv("INDEXER_ARBSEPOLIA_FROM_BLOCK", 268217000n)
+};
+
+// V3.1 marketplace ships only on Arbitrum Sepolia at this time. The deploy
+// tx sits ~268278000 give or take; same Alchemy 10-block cap caveat
+// applies, so the env override INDEXER_V3_1_ARBSEPOLIA_FROM_BLOCK is the
+// expected way to point the indexer at a recent block when starting fresh.
+export const DEPLOYMENT_BLOCK_V3_1: Record<number, bigint> = {
+  [arbitrumSepolia.id]: readPositiveBigIntEnv("INDEXER_V3_1_ARBSEPOLIA_FROM_BLOCK", 268278000n)
 };
 
 export const INDEXER_CHUNK_SIZE_BLOCKS = readPositiveBigIntEnv("INDEXER_CHUNK_SIZE_BLOCKS", 5000n);
@@ -124,6 +147,25 @@ export function getIndexerMarketplaceAddress(chainId: number) {
   }
 
   throw new Error(`Unsupported indexer chain: ${chainId}`);
+}
+
+// V3.1 marketplace address resolver. Only arbitrumSepolia is supported.
+// Returns the configured V3.1 marketplace; throws if the env is missing
+// (callers should gate on INDEXED_V3_1_CHAIN_IDS so this never fires).
+export function getIndexerV3_1MarketplaceAddress(chainId: number): Address {
+  if (chainId === arbitrumSepolia.id) {
+    const address =
+      (process.env.NEXT_PUBLIC_V3_1_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS as Address | undefined) ??
+      (process.env.V3_1_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS as Address | undefined);
+
+    if (!address) {
+      throw new Error("V3.1 marketplace not configured on arbitrumSepolia");
+    }
+
+    return address;
+  }
+
+  throw new Error(`V3.1 indexer is not enabled for chain ${chainId}`);
 }
 
 export function getIndexerEvidenceRegistryAddress(chainId: number): Address | undefined {

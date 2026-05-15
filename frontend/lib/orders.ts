@@ -2,6 +2,11 @@ import { prisma } from "@/lib/db";
 
 export type OrderStatusName = "Created" | "Paid" | "Shipped" | "Completed" | "Cancelled" | "Disputed" | "Refunded";
 
+// Which marketplace contract this order lives in. Email templates and the
+// order detail link use this to pick the right URL ("/orders/..." for V3,
+// "/v3_1/orders/..." for V3.1).
+export type MarketplaceVersion = "v3" | "v3.1";
+
 export type ProductSummary = {
   id: number;
   name: string;
@@ -28,7 +33,9 @@ export type ApiOrder = {
   trackingUrl: string | null;
   shippingNote: string | null;
   shippingUpdatedAt: string | null;
+  lastTxHash: string | null;
   product: ProductSummary | null;
+  marketplaceVersion: MarketplaceVersion;
 };
 
 export async function listOrders(params: {
@@ -59,27 +66,34 @@ export async function listOrders(params: {
   const products = await findProductsForOrders(orders);
 
   return {
-    orders: orders.map((order) => serializeOrder(order, products.get(order.productId) ?? null)),
+    orders: orders.map((order) => serializeOrder(order, products.get(order.productId) ?? null, "v3")),
     total
   };
 }
 
-export async function getOrder(chainId: number, onChainOrderId: string) {
-  const order = await prisma.onChainOrder.findUnique({
-    where: {
-      chainId_onChainOrderId: {
-        chainId,
-        onChainOrderId
-      }
-    }
-  });
+export async function getOrder(
+  chainId: number,
+  onChainOrderId: string,
+  marketplaceVersion: MarketplaceVersion = "v3"
+) {
+  // V3.1 orders live in OnChainOrderV3_1 — they have an independent
+  // orderId counter, so V3 #N and V3.1 #N are unrelated. Same column
+  // layout, so serializeOrder works for both.
+  const order =
+    marketplaceVersion === "v3.1"
+      ? await prisma.onChainOrderV3_1.findUnique({
+          where: { chainId_onChainOrderId: { chainId, onChainOrderId } }
+        })
+      : await prisma.onChainOrder.findUnique({
+          where: { chainId_onChainOrderId: { chainId, onChainOrderId } }
+        });
 
   if (!order) {
     return null;
   }
 
   const products = await findProductsForOrders([order]);
-  return serializeOrder(order, products.get(order.productId) ?? null);
+  return serializeOrder(order, products.get(order.productId) ?? null, marketplaceVersion);
 }
 
 export function needsSellerAction(order: Pick<ApiOrder, "status">) {
@@ -128,8 +142,10 @@ function serializeOrder(
     trackingUrl: string | null;
     shippingNote: string | null;
     shippingUpdatedAt: Date | null;
+    lastTxHash: string | null;
   },
-  product: ProductSummary | null
+  product: ProductSummary | null,
+  marketplaceVersion: MarketplaceVersion
 ): ApiOrder {
   return {
     chainId: order.chainId,
@@ -150,7 +166,9 @@ function serializeOrder(
     trackingUrl: order.trackingUrl,
     shippingNote: order.shippingNote,
     shippingUpdatedAt: toIsoString(order.shippingUpdatedAt),
-    product
+    lastTxHash: order.lastTxHash,
+    product,
+    marketplaceVersion
   };
 }
 

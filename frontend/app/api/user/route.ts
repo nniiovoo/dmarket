@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { withErrorBoundary } from "@/lib/api/withErrorBoundary";
 import { prisma } from "@/lib/db";
 import { userEmailQuerySchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+export const GET = withErrorBoundary(async (request: NextRequest) => {
   const parsed = userEmailQuerySchema.safeParse(Object.fromEntries(request.nextUrl.searchParams.entries()));
 
   if (!parsed.success) {
@@ -26,4 +27,4 @@ export async function GET(request: NextRequest) {
     hasEmail: Boolean(user.email),
     emailVerified: user.emailVerified
   });
-}
+});

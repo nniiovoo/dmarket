@@ -106,23 +106,26 @@ function notifyForEvent(
 ) {
   const payload = { chainId, onChainOrderId: ev.orderId.toString() };
 
+  // Explicit "v3" everywhere even though it's the default — defense against
+  // future positional-arg drift now that queueNotification takes
+  // (addr, kind, payload, marketplaceVersion, delayMs).
   switch (ev.kind) {
     case "Paid":
-      queueNotification(order.seller, "OrderPaid", payload);
+      queueNotification(order.seller, "OrderPaid", payload, "v3");
       break;
     case "Shipped":
-      queueNotification(order.buyer, "OrderShipped", payload, 8000);
+      queueNotification(order.buyer, "OrderShipped", payload, "v3", 8000);
       break;
     case "Completed":
-      queueNotification(order.seller, "OrderCompleted", payload);
+      queueNotification(order.seller, "OrderCompleted", payload, "v3");
       break;
     case "Disputed":
-      queueNotification(order.buyer, "OrderDisputed", payload);
-      queueNotification(order.seller, "OrderDisputed", payload);
-      void sendOwnerNotification("OrderDisputed", payload);
+      queueNotification(order.buyer, "OrderDisputed", payload, "v3");
+      queueNotification(order.seller, "OrderDisputed", payload, "v3");
+      void sendOwnerNotification("OrderDisputed", payload, "v3");
       break;
     case "Refunded":
-      queueNotification(order.buyer, "OrderRefunded", payload);
+      queueNotification(order.buyer, "OrderRefunded", payload, "v3");
       break;
     case "Created":
     case "Cancelled":

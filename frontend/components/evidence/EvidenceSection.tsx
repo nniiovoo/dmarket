@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Card } from "@/components/Card";
 import { isEvidenceRegistryDeployed, isKlerosAdapterDeployed } from "@/lib/contracts";
@@ -13,8 +14,10 @@ import { SubmitEvidenceDialog } from "./SubmitEvidenceDialog";
 const ELIGIBLE_STATUSES = new Set(["Paid", "Shipped", "Disputed"]);
 
 export function EvidenceSection({ order }: { order: ApiOrder }) {
+  const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [pollUntil, setPollUntil] = useState<number | undefined>();
   const evidenceRegistryDeployed = isEvidenceRegistryDeployed(order.chainId);
   const klerosAdapterDeployed = isKlerosAdapterDeployed(order.chainId);
 
@@ -42,6 +45,7 @@ export function EvidenceSection({ order }: { order: ApiOrder }) {
         chainId={order.chainId}
         onChainOrderId={order.onChainOrderId}
         refreshKey={refreshKey}
+        pollUntil={pollUntil}
       />
 
       <EscalateToKlerosButton
@@ -53,7 +57,13 @@ export function EvidenceSection({ order }: { order: ApiOrder }) {
         <SubmitEvidenceDialog
           order={order}
           onClose={() => setDialogOpen(false)}
-          onSubmitted={() => setRefreshKey((k) => k + 1)}
+          onSubmitted={() => {
+            setRefreshKey((k) => k + 1);
+            setPollUntil(Date.now() + 1_500);
+            void queryClient.invalidateQueries({
+              queryKey: ["evidence", order.chainId, order.onChainOrderId]
+            });
+          }}
         />
       )}
     </Card>

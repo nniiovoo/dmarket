@@ -4,6 +4,8 @@ import {
   createConfig,
   executeRoute,
   getQuote,
+  getStatus,
+  type GetStatusRequestExtended,
   type LiFiStep,
   type QuoteRequest,
   type Route
@@ -102,4 +104,9 @@ export async function executeBridge(params: {
   return executeRoute(params.quote.raw, {
     updateRouteHook: params.onUpdate
   });
+}
+
+export async function getBridgeStatus(params: GetStatusRequestExtended) {
+  initLifi();
+  return getStatus(params);
 }

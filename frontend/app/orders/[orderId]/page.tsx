@@ -5,8 +5,10 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAccount, useReadContract } from "wagmi";
+import type { Address } from "viem";
 
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
+import { OrderChatPanel } from "@/components/chat/OrderChatPanel";
 import { EvidenceSection } from "@/components/evidence/EvidenceSection";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { LockedActions } from "@/components/order/LockedActions";
@@ -20,12 +22,55 @@ import { TxPanel } from "@/components/TxPanel";
 import { fetchOrder } from "@/lib/api/orders";
 import { PRIMARY_CHAIN_ID, getExplorerAddressUrl } from "@/lib/chains";
 import { escrowVaultAbi, getActiveMarketplace, hasMarketplace, type ActiveMarketplace } from "@/lib/contracts";
-import { formatAmount, formatTimestamp, normalizeOrder, OrderStatus } from "@/lib/order";
+import { formatAmount, formatTimestamp, normalizeOrder, OrderStatus, type OrderView } from "@/lib/order";
 import { computeActions, getRole, type AvailableAction } from "@/lib/orderPermissions";
 import { computeTimeline } from "@/lib/orderTimeline";
-import type { ApiOrder } from "@/lib/orders";
+import type { ApiOrder, OrderStatusName } from "@/lib/orders";
 
 const refetchInterval = 12_000;
+
+// Once an order reaches one of these statuses there is nothing more the
+// chain can tell us about it — stop hammering RPC.
+const TERMINAL_STATUSES = new Set<OrderStatusName>(["Completed", "Cancelled", "Refunded"]);
+
+// Map the human-readable status name (from the indexer's serialized form)
+// back to the on-chain enum value. Order must match the OrderStatus enum
+// in lib/order.ts.
+const ORDER_STATUS_BY_NAME: Record<OrderStatusName, OrderStatus> = {
+  Created: OrderStatus.Created,
+  Paid: OrderStatus.Paid,
+  Shipped: OrderStatus.Shipped,
+  Completed: OrderStatus.Completed,
+  Cancelled: OrderStatus.Cancelled,
+  Disputed: OrderStatus.Disputed,
+  Refunded: OrderStatus.Refunded
+};
+
+// Convert an indexer-shaped ApiOrder back into the OrderView shape the page
+// expects from on-chain reads. Used as a fallback when the wagmi
+// useReadContract call errors out (rate limit, transient RPC issue, etc.)
+// so the UI still renders a useful state from cached data instead of
+// "Order not found".
+function apiOrderToOrderView(api: ApiOrder): OrderView {
+  const toUnixBigInt = (iso: string | null): bigint => {
+    if (!iso) return 0n;
+    const ms = Date.parse(iso);
+    if (Number.isNaN(ms)) return 0n;
+    return BigInt(Math.floor(ms / 1000));
+  };
+  return {
+    id: BigInt(api.onChainOrderId),
+    buyer: api.buyer as Address,
+    status: ORDER_STATUS_BY_NAME[api.status],
+    createdAt: toUnixBigInt(api.createdAt),
+    seller: api.seller as Address,
+    paidAt: toUnixBigInt(api.paidAt),
+    productId: BigInt(api.productId),
+    amount: BigInt(api.amountWei),
+    shippedAt: toUnixBigInt(api.shippedAt),
+    completedAt: toUnixBigInt(api.completedAt)
+  };
+}
 
 export default function OrderDetailPage() {
   const params = useParams<{ orderId: string }>();
@@ -38,32 +83,6 @@ export default function OrderDetailPage() {
   const active = getActiveMarketplace(targetChainId);
   const supported = hasMarketplace(targetChainId);
 
-  const orderQuery = useReadContract({
-    address: active?.address,
-    abi: active?.abi,
-    chainId: targetChainId,
-    functionName: "getOrder",
-    args: orderId === undefined ? undefined : [orderId],
-    query: { enabled: supported && orderId !== undefined, refetchInterval, retry: false }
-  });
-
-  const vaultQuery = useReadContract({
-    address: active?.vault,
-    abi: escrowVaultAbi,
-    chainId: targetChainId,
-    functionName: "lockedAmount",
-    args: orderId === undefined ? undefined : [orderId],
-    query: { enabled: supported && orderId !== undefined, refetchInterval }
-  });
-
-  const ownerQuery = useReadContract({
-    address: active?.address,
-    abi: active?.abi,
-    chainId: targetChainId,
-    functionName: "owner",
-    query: { enabled: supported, refetchInterval }
-  });
-
   const orderApi = useQuery({
     queryKey: ["order", targetChainId, orderId?.toString()],
     queryFn: () => fetchOrder(targetChainId, orderId?.toString() ?? ""),
@@ -72,7 +91,47 @@ export default function OrderDetailPage() {
     retry: false
   });
 
-  const order = normalizeOrder(orderQuery.data);
+  // Decide whether the order is in a terminal state (no further on-chain
+  // events possible). When it is, freeze the polling on the chain-side reads
+  // — they would only burn quota. We base the decision on whichever data
+  // arrived first; if both are present they should agree.
+  const apiStatus = orderApi.data?.status;
+  const isTerminal = apiStatus !== undefined && TERMINAL_STATUSES.has(apiStatus);
+  const chainPollInterval = isTerminal ? false : refetchInterval;
+
+  const orderQuery = useReadContract({
+    address: active?.address,
+    abi: active?.abi,
+    chainId: targetChainId,
+    functionName: "getOrder",
+    args: orderId === undefined ? undefined : [orderId],
+    query: { enabled: supported && orderId !== undefined, refetchInterval: chainPollInterval, retry: false }
+  });
+
+  const vaultQuery = useReadContract({
+    address: active?.vault,
+    abi: escrowVaultAbi,
+    chainId: targetChainId,
+    functionName: "lockedAmount",
+    args: orderId === undefined ? undefined : [orderId],
+    query: { enabled: supported && orderId !== undefined, refetchInterval: chainPollInterval }
+  });
+
+  const ownerQuery = useReadContract({
+    address: active?.address,
+    abi: active?.abi,
+    chainId: targetChainId,
+    functionName: "owner",
+    query: { enabled: supported, refetchInterval: chainPollInterval }
+  });
+
+  // Prefer the live on-chain read; fall back to a OrderView synthesized from
+  // the indexer cache when the chain read is unavailable (rate limit, RPC
+  // hiccup, etc.). This keeps the page useful instead of showing
+  // "Order not found" for what is in fact a known order.
+  const onChainOrder = normalizeOrder(orderQuery.data);
+  const usingCachedFallback = onChainOrder === undefined && orderApi.data !== undefined;
+  const order = onChainOrder ?? (orderApi.data ? apiOrderToOrderView(orderApi.data) : undefined);
   const lockedAmount = vaultQuery.data as bigint | undefined;
   const owner = ownerQuery.data as string | undefined;
   const role =
@@ -117,16 +176,29 @@ export default function OrderDetailPage() {
         <EmptyState title="Unsupported network" body="This order chain is not configured in the frontend." />
       ) : orderId === undefined ? (
         <EmptyState title="Invalid order ID" body="Use a positive numeric order ID." />
-      ) : orderQuery.isLoading ? (
+      ) : order === undefined && (orderQuery.isLoading || orderApi.isLoading) ? (
         <Card>
           <SkeletonLine />
           <SkeletonLine className="mt-2 w-2/3" />
         </Card>
-      ) : order === undefined || orderQuery.isError ? (
+      ) : order === undefined ? (
         <EmptyState title="Order not found" body="This order ID does not exist on the selected network." />
       ) : (
         <>
-          {orderApi.isLoading || orderApi.isError ? (
+          {usingCachedFallback ? (
+            <Card title="Live on-chain read unavailable" action={<StatusBadge status={order.status} />}>
+              <p className="text-sm text-slate-700">
+                Showing the most recent indexer snapshot
+                {orderApi.data?.shippingUpdatedAt
+                  ? ` (synced at ${new Date(orderApi.data.shippingUpdatedAt).toLocaleString()})`
+                  : orderApi.data?.createdAt
+                    ? ` (last update ${new Date(orderApi.data.createdAt).toLocaleString()})`
+                    : ""}
+                . Refresh in a minute or check status on the explorer.
+              </p>
+            </Card>
+          ) : null}
+          {!usingCachedFallback && (orderApi.isLoading || orderApi.isError) ? (
             <Card title="On-chain confirmation" action={<StatusBadge status={order.status} />}>
               <p className="text-sm text-slate-700">Order #{orderId.toString()} is confirmed on-chain. Product details are still syncing from the indexer.</p>
               <OrderProcessingHint />
@@ -178,6 +250,7 @@ export default function OrderDetailPage() {
             {orderQuery.isFetching || vaultQuery.isFetching ? <p className="mt-3 text-xs text-slate-500">Refreshing...</p> : null}
           </Card>
           <ShippingSection order={orderApi.data} status={order.status} isLoading={orderApi.isLoading} isSyncing={orderApi.isError} />
+          {orderApi.data ? <OrderChatPanel order={orderApi.data} /> : null}
           {orderApi.data ? <EvidenceSection order={orderApi.data} /> : null}
           {showShipDialog ? (
             <ShipWithTrackingDialog
@@ -469,7 +542,11 @@ function toApiOrder(apiOrder: ApiOrder | undefined, order: NonNullable<ReturnTyp
     trackingUrl: null,
     shippingNote: null,
     shippingUpdatedAt: null,
-    product: null
+    lastTxHash: null,
+    product: null,
+    // This page only renders V3 orders (V3.1 has its own /v3_1/orders page),
+    // so the placeholder shape is always V3.
+    marketplaceVersion: "v3"
   };
 }
 

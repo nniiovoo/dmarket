@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
 
+import { withErrorBoundary } from "@/lib/api/withErrorBoundary";
 import { verifySellerSignature } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { productCreateSchema, productListQuerySchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+export const GET = withErrorBoundary(async (request: NextRequest) => {
   const parsed = productListQuerySchema.safeParse(Object.fromEntries(request.nextUrl.searchParams.entries()));
 
   if (!parsed.success) {
@@ -32,9 +33,9 @@ export async function GET(request: NextRequest) {
   ]);
 
   return NextResponse.json({ products, total });
-}
+});
 
-export async function POST(request: NextRequest) {
+export const POST = withErrorBoundary(async (request: NextRequest) => {
   try {
     const body = await request.json();
     const data = productCreateSchema.parse(body);
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: "Failed to create product" }, { status: 500 });
   }
-}
+});
 
 function validationError(error: ZodError) {
   return NextResponse.json({ error: "Validation failed", details: error.flatten() }, { status: 400 });

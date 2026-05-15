@@ -25,6 +25,10 @@ const abiTargets = [
   {
     artifact: "artifacts/contracts/v3/KlerosV2DisputeAdapter.sol/KlerosV2DisputeAdapter.json",
     output: "frontend/abi/KlerosV2DisputeAdapter.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3_1/EscrowMarketplaceV3_1.sol/EscrowMarketplaceV3_1.json",
+    output: "frontend/abi/EscrowMarketplaceV3_1.json"
   }
 ];
 

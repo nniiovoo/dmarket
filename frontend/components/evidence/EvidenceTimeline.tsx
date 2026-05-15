@@ -1,43 +1,48 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { fetchEvidenceForOrder, type ApiEvidence } from "@/lib/api/evidence";
 
 export function EvidenceTimeline({
   chainId,
   onChainOrderId,
-  refreshKey
+  refreshKey,
+  pollUntil
 }: {
   chainId: number;
   onChainOrderId: string;
   refreshKey?: number;
+  pollUntil?: number;
 }) {
-  const [evidence, setEvidence] = useState<ApiEvidence[] | null>(null);
-  const [error, setError] = useState<string | undefined>();
+  const [now, setNow] = useState(() => Date.now());
+  const recentlySubmitted = pollUntil !== undefined && now < pollUntil;
+
+  const query = useQuery({
+    queryKey: ["evidence", chainId, onChainOrderId],
+    queryFn: () => fetchEvidenceForOrder(chainId, onChainOrderId),
+    refetchInterval: recentlySubmitted ? 500 : false
+  });
 
   useEffect(() => {
-    let cancelled = false;
-    setEvidence(null);
-    setError(undefined);
+    void query.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
-    fetchEvidenceForOrder(chainId, onChainOrderId)
-      .then(({ evidence }) => {
-        if (!cancelled) setEvidence(evidence);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load evidence");
-      });
+  useEffect(() => {
+    if (!recentlySubmitted) return undefined;
+    const timer = window.setTimeout(() => setNow(Date.now()), 250);
+    return () => window.clearTimeout(timer);
+  }, [recentlySubmitted, now]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [chainId, onChainOrderId, refreshKey]);
+  const evidence = query.data?.evidence;
+  const error = query.error instanceof Error ? query.error.message : query.error ? "Failed to load evidence" : undefined;
 
   if (error) {
     return <div className="text-sm text-red-600">Failed to load evidence: {error}</div>;
   }
-  if (evidence === null) {
+  if (evidence === undefined) {
     return <div className="text-sm text-slate-500">Loading evidence…</div>;
   }
   if (evidence.length === 0) {

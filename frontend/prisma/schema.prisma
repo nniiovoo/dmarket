@@ -61,6 +61,49 @@ model IndexerState {
   updatedAt DateTime @updatedAt
 }
 
+// Mirror of OnChainOrder for V3.1 marketplace. V3 and V3.1 have separate
+// orderId counters and share zero data on-chain, so we keep them physically
+// separated in the DB rather than overload a `version` column on OnChainOrder.
+model OnChainOrderV3_1 {
+  id                Int       @id @default(autoincrement())
+  chainId           Int
+  onChainOrderId    String
+  buyer             String
+  seller            String
+  productId         String
+  amountWei         String
+  status            String
+  createdAt         DateTime?
+  paidAt            DateTime?
+  shippedAt         DateTime?
+  completedAt       DateTime?
+  refundedAt        DateTime?
+  disputedAt        DateTime?
+  lastBlock         BigInt
+  lastLogIndex      Int       @default(0)
+  lastTxHash        String
+  lastSyncedAt      DateTime  @default(now())
+  carrier           String?
+  trackingNumber    String?
+  trackingUrl       String?
+  shippingNote      String?
+  shippingUpdatedAt DateTime?
+
+  @@unique([chainId, onChainOrderId])
+  @@index([buyer])
+  @@index([seller])
+  @@index([status])
+  @@index([chainId])
+}
+
+// Per-chain catch-up cursor for the V3.1 indexer. Separate from
+// IndexerState so V3.1 can lag/lead V3 independently.
+model IndexerStateV3_1 {
+  chainId   Int      @id
+  lastBlock BigInt
+  updatedAt DateTime @updatedAt
+}
+
 model User {
   walletAddress String   @id
   email         String?
@@ -72,17 +115,21 @@ model User {
 }
 
 model EmailLog {
-  id             Int      @id @default(autoincrement())
-  toAddress      String
-  toEmail        String
-  kind           String
-  chainId        Int
-  onChainOrderId String
-  status         String
-  error          String?
-  createdAt      DateTime @default(now())
+  id                 Int      @id @default(autoincrement())
+  toAddress          String
+  toEmail            String
+  kind               String
+  chainId            Int
+  onChainOrderId     String
+  // "v3" or "v3.1". Distinguishes V3 and V3.1 marketplaces — they have
+  // independent orderId counters, so without this column the 24h dedup
+  // key collides (V3 #3 and V3.1 #3 are unrelated orders).
+  marketplaceVersion String   @default("v3")
+  status             String
+  error              String?
+  createdAt          DateTime @default(now())
 
-  @@index([toAddress, kind, onChainOrderId])
+  @@index([toAddress, kind, chainId, onChainOrderId, marketplaceVersion])
   @@index([createdAt])
 }
 
@@ -135,4 +182,107 @@ model Evidence {
   @@index([chainId, onChainOrderId])
   @@index([party])
   @@index([oracleQueryStatus])
+}
+
+// Uploaded evidence files. Bytes live in our storage backend (local FS in
+// dev, R2/S3 in prod); the public URL returned to the user resolves through
+// /api/evidence/files/[id] which is auth-gated. The on-chain submitEvidence
+// call only commits the contentHash (keccak256 of file bytes), so the file
+// can be replaced server-side only if the hash matches.
+model EvidenceUpload {
+  id             String   @id  // 32-byte random, URL-safe
+  chainId        Int
+  onChainOrderId String
+  marketplaceVersion String @default("v3")
+  contentHash    String   // 0x-prefixed keccak256 hex of file bytes
+  storageKey     String   // path/key within the storage backend
+  storageBackend String   // "local" | "r2" | "s3"
+  fileName       String
+  contentType    String
+  size           Int
+  uploadedBy     String   // lowercased wallet address
+  createdAt      DateTime @default(now())
+
+  @@index([chainId, onChainOrderId, marketplaceVersion])
+  @@index([contentHash])
+  @@index([uploadedBy])
+}
+
+// One-time SIWE nonces. We hand out a fresh nonce on /auth/siwe/nonce and
+// invalidate it on first /auth/siwe/verify. Stops replay of captured
+// SIWE messages.
+model SiweNonce {
+  nonce     String   @id
+  createdAt DateTime @default(now())
+  usedAt    DateTime?
+
+  @@index([createdAt])
+}
+
+// Active SIWE sessions. The session ID lives in an HttpOnly cookie; the row
+// here lets us revoke without touching the cookie (set expiresAt to past).
+model AuthSession {
+  id        String   @id  // 32-byte random, URL-safe
+  address   String   // lowercased
+  issuedAt  DateTime @default(now())
+  expiresAt DateTime
+  lastUsedAt DateTime @default(now())
+
+  @@index([address])
+  @@index([expiresAt])
+}
+
+// DEPRECATED as of the unified messenger refactor. Rows are kept readable
+// for audit / migration but the UI no longer mounts the per-order chat
+// panel. New chats go through the Conversation / ConversationMessage
+// tables below, which scope a thread to a (buyer, seller) pair rather
+// than to a single order.
+//
+// Original purpose:
+// Per-order private chat between buyer and seller. Platform admins
+// (EVIDENCE_ADMIN_ADDRESSES env) can read but not write — admin support
+// shouldn't be able to impersonate either party. Messages don't touch the
+// chain; this is purely Web2 support context that can be referenced as
+// supplementary evidence in a future dispute.
+//
+// Attachments: optional single image per message. Bytes live in the same
+// storage backend as evidence (local FS or R2), served behind the gated
+// /api/orders/[chainId]/[orderId]/chat/[messageId]/file endpoint. Keeping
+// the columns nullable lets old text-only messages coexist without
+// migration of their data.
+model OrderChatMessage {
+  id                 String   @id   // 32-byte base64url
+  chainId            Int
+  onChainOrderId     String
+  // "v3" or "v3.1". Same reason as EmailLog.marketplaceVersion: V3 #N and
+  // V3.1 #N are unrelated orders, so the (chainId, orderId) key alone isn't
+  // enough to identify a chat thread.
+  marketplaceVersion String   @default("v3")
+  senderAddress      String   // lowercased
+  body               String   @db.Text   // up to ~8KB chat message
+  createdAt          DateTime @default(now())
+
+  attachmentKey         String?
+  attachmentBackend     String?  // "local" | "r2"
+  attachmentContentType String?
+  attachmentFileName    String?
+  attachmentSize        Int?
+
+  @@index([chainId, onChainOrderId, marketplaceVersion, createdAt])
+  @@index([senderAddress])
+}
+
+// Per-user, per-thread "last seen" cursor. Used by /api/inbox to compute
+// unread counts: a message is "unread" if createdAt > lastSeenAt AND it
+// wasn't sent by the viewer. Updated whenever a user GETs the chat
+// (i.e. opens the order detail page).
+model OrderChatLastSeen {
+  walletAddress      String   // lowercased
+  chainId            Int
+  onChainOrderId     String
+  marketplaceVersion String   @default("v3")
+  lastSeenAt         DateTime @default(now())
+
+  @@id([walletAddress, chainId, onChainOrderId, marketplaceVersion])
+  @@index([walletAddress, lastSeenAt])
 }
