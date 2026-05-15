@@ -2,19 +2,24 @@ import { prisma } from "../lib/db";
 import { catchUp } from "../lib/indexer/catchUp";
 import { catchUpV3_1 } from "../lib/indexer/catchUpV3_1";
 import { catchUpV3_2 } from "../lib/indexer/catchUpV3_2";
+import { catchUpV3_2Kleros } from "../lib/indexer/catchUpV3_2Kleros";
 import {
   DEPLOYMENT_BLOCK,
   DEPLOYMENT_BLOCK_V3_1,
   DEPLOYMENT_BLOCK_V3_2,
+  DEPLOYMENT_BLOCK_V3_2_KLEROS,
+  getIndexerV3_2KlerosAdapterAddress,
   getIndexerV3_2MarketplaceAddress,
   INDEXED_CHAIN_IDS,
   INDEXED_V3_1_CHAIN_IDS,
   INDEXED_V3_2_CHAIN_IDS,
+  INDEXED_V3_2_KLEROS_CHAIN_IDS,
   INDEXER_POLL_INTERVAL_MS
 } from "../lib/indexer/config";
 import { liveWatch } from "../lib/indexer/liveWatch";
 import { liveWatchV3_1 } from "../lib/indexer/liveWatchV3_1";
 import { liveWatchV3_2 } from "../lib/indexer/liveWatchV3_2";
+import { liveWatchV3_2Kleros } from "../lib/indexer/liveWatchV3_2Kleros";
 
 const once = process.argv.includes("--once");
 
@@ -50,6 +55,17 @@ async function main() {
     }
   }
 
+  // V3.2 Kleros adapter catch-up — independent stream that mirrors
+  // adapter events onto the existing OnChainOrderV3_2 rows. Failure
+  // here MUST NOT abort the marketplace pass above.
+  for (const chainId of INDEXED_V3_2_KLEROS_CHAIN_IDS) {
+    try {
+      await catchUpV3_2KlerosFromState(chainId);
+    } catch (error) {
+      console.error(`[v3.2 kleros chain ${chainId}] initial catch-up failed, will retry on next tick`, error);
+    }
+  }
+
   if (once) {
     await prisma.$disconnect();
     return;
@@ -58,6 +74,7 @@ async function main() {
   const stoppers = INDEXED_CHAIN_IDS.map((chainId) => liveWatch(chainId));
   const v3_1Stoppers = INDEXED_V3_1_CHAIN_IDS.map((chainId) => liveWatchV3_1(chainId));
   const v3_2Stoppers = INDEXED_V3_2_CHAIN_IDS.map((chainId) => liveWatchV3_2(chainId));
+  const v3_2KlerosStoppers = INDEXED_V3_2_KLEROS_CHAIN_IDS.map((chainId) => liveWatchV3_2Kleros(chainId));
   const interval = setInterval(() => {
     void runPeriodicCatchUp();
   }, INDEXER_POLL_INTERVAL_MS);
@@ -67,6 +84,7 @@ async function main() {
     stoppers.forEach((stop) => stop());
     v3_1Stoppers.forEach((stop) => stop());
     v3_2Stoppers.forEach((stop) => stop());
+    v3_2KlerosStoppers.forEach((stop) => stop());
     await prisma.$disconnect();
     process.exit(0);
   }
@@ -103,6 +121,14 @@ async function runPeriodicCatchUp() {
       console.error(`[v3.2 chain ${chainId}] periodic catch-up failed`, error);
     }
   }
+
+  for (const chainId of INDEXED_V3_2_KLEROS_CHAIN_IDS) {
+    try {
+      await catchUpV3_2KlerosFromState(chainId);
+    } catch (error) {
+      console.error(`[v3.2 kleros chain ${chainId}] periodic catch-up failed`, error);
+    }
+  }
 }
 
 async function catchUpFromState(chainId: number) {
@@ -130,6 +156,17 @@ async function catchUpV3_2FromState(chainId: number) {
   const lastProcessed = await catchUpV3_2(chainId, fromBlock);
 
   console.log(`[v3.2 chain ${chainId}] caught up to block ${lastProcessed}`);
+}
+
+async function catchUpV3_2KlerosFromState(chainId: number) {
+  const adapterAddress = getIndexerV3_2KlerosAdapterAddress(chainId).toLowerCase();
+  const state = await prisma.indexerStateV3_2KlerosAdapter.findUnique({
+    where: { chainId_adapterAddress: { chainId, adapterAddress } }
+  });
+  const fromBlock = state ? state.lastIndexedBlock + 1n : DEPLOYMENT_BLOCK_V3_2_KLEROS[chainId];
+  const lastProcessed = await catchUpV3_2Kleros(chainId, fromBlock);
+
+  console.log(`[v3.2 kleros chain ${chainId}] caught up to block ${lastProcessed}`);
 }
 
 main().catch(async (error) => {

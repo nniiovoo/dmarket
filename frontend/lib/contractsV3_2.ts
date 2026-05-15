@@ -2,9 +2,11 @@ import type { Abi, Address } from "viem";
 import { arbitrumSepolia } from "wagmi/chains";
 
 import escrowMarketplaceERC20AbiJson from "@/abi/EscrowMarketplaceERC20.json";
+import klerosAdapterV3_2AbiJson from "@/abi/KlerosV2DisputeAdapterV3_2.json";
 import reputationRegistryAbiJson from "@/abi/ReputationRegistry.json";
 
 export const escrowMarketplaceERC20Abi = escrowMarketplaceERC20AbiJson as Abi;
+export const klerosAdapterV3_2Abi = klerosAdapterV3_2AbiJson as Abi;
 export const reputationRegistryAbi = reputationRegistryAbiJson as Abi;
 
 export type AcceptedToken = {
@@ -17,6 +19,7 @@ export type AcceptedToken = {
 export type V3_2ContractAddresses = {
   marketplace: Address;
   reputation?: Address;
+  klerosAdapter?: Address;
 };
 
 const ARB_SEPOLIA_MOCK_USD = process.env.NEXT_PUBLIC_V3_2_ARBITRUMSEPOLIA_MOCK_USD_ADDRESS as Address | undefined;
@@ -42,7 +45,8 @@ export function getV3_2ContractAddresses(chainId: number | undefined): V3_2Contr
 
   return {
     marketplace,
-    reputation: process.env.NEXT_PUBLIC_V3_2_ARBITRUMSEPOLIA_REPUTATION_ADDRESS as Address | undefined
+    reputation: process.env.NEXT_PUBLIC_V3_2_ARBITRUMSEPOLIA_REPUTATION_ADDRESS as Address | undefined,
+    klerosAdapter: process.env.NEXT_PUBLIC_V3_2_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS as Address | undefined
   };
 }
 

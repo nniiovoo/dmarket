@@ -9,13 +9,16 @@ import { formatUnits, type Address } from "viem";
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
 import { OrderTimeline } from "@/components/order/OrderTimeline";
 import { StatusBadge } from "@/components/order/StatusBadge";
+import { V3_2KlerosSection } from "@/components/orders/V3_2KlerosSection";
+import { V3_2OrderActions } from "@/components/orders/V3_2OrderActions";
 import { ReputationBadge } from "@/components/reputation/ReputationBadge";
 import { fetchOrderV3_2 } from "@/lib/api/orders";
 import { getExplorerAddressUrl, getExplorerTxUrl } from "@/lib/chains";
-import { getAcceptedTokens } from "@/lib/contractsV3_2";
+import { getAcceptedTokens, getV3_2ContractAddresses } from "@/lib/contractsV3_2";
 import { formatAmount, formatTimestamp, OrderStatus, type OrderView } from "@/lib/order";
 import { computeTimeline } from "@/lib/orderTimeline";
 import type { ApiOrder, OrderStatusName } from "@/lib/orders";
+import { useOrderRole } from "@/lib/v3_2/useOrderRole";
 
 // V3.2 order detail page. Self-contained renderer that hits the
 // /api/orders/v3_2 cache (not on-chain). This route exists so the URL
@@ -59,6 +62,14 @@ export default function OrderV3_2DetailPage() {
   const view = useMemo<OrderView | undefined>(() => (apiOrder ? apiOrderToView(apiOrder) : undefined), [apiOrder]);
   const timeline = view ? computeTimeline(view) : [];
   const amountLabel = view ? formatV3_2Amount(view, chainId) : "-";
+  // Hook must be called unconditionally. Pass zero-address fallbacks so
+  // the hook is happy when the order hasn't loaded yet; it returns
+  // 'observer' in that case, which is fine because nothing renders the
+  // role-dependent UI until `view` is non-null below.
+  const { role } = useOrderRole({
+    buyer: (view?.buyer ?? ZERO_ADDRESS) as Address,
+    seller: (view?.seller ?? ZERO_ADDRESS) as Address
+  });
 
   if (!valid) {
     return <EmptyState title="Invalid order URL" body="URL must be /orders/v3_2/[chainId]/[marketplace]/[orderId]." />;
@@ -91,6 +102,8 @@ export default function OrderV3_2DetailPage() {
   const seller = view.seller;
   const paymentToken = view.paymentToken;
   const txUrl = getExplorerTxUrl(chainId, apiOrder.lastTxHash ?? undefined);
+  const v3_2 = getV3_2ContractAddresses(chainId);
+  const adapterAddress = v3_2?.klerosAdapter;
 
   return (
     <div className="space-y-6">
@@ -117,6 +130,26 @@ export default function OrderV3_2DetailPage() {
           ) : null}
         </div>
       </Card>
+
+      {view.status === OrderStatus.Disputed && adapterAddress ? (
+        <V3_2KlerosSection
+          order={{ onChainOrderId }}
+          chainId={chainId}
+          adapterAddress={adapterAddress}
+          role={role}
+        />
+      ) : null}
+
+      <V3_2OrderActions
+        order={{
+          buyer,
+          seller,
+          onChainOrderId,
+          status: view.status
+        }}
+        chainId={chainId}
+        marketplaceAddress={marketplaceAddress as Address}
+      />
 
       <Card title="进度时间线">
         <OrderTimeline stages={timeline} />

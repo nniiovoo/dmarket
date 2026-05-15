@@ -19,9 +19,23 @@ export type IndexerV3_2Status = {
   error?: string;
 };
 
+export type IndexerV3_2KlerosStatus = {
+  chainId: number;
+  adapterAddress: string;
+  lastIndexedBlock: string | null;
+  currentBlock: string | null;
+  lagBlocks: number | null;
+  lagSeconds: number | null;
+  escalatedCount: number | null;
+  ruledCount: number | null;
+  status: "healthy" | "syncing" | "lagging" | "unknown";
+  error?: string;
+};
+
 export type IndexerStatusResponse = {
   chains: IndexerChainStatus[];
   v3_2: IndexerV3_2Status | null;
+  v3_2_kleros: IndexerV3_2KlerosStatus | null;
 };
 
 export async function fetchIndexerStatus() {

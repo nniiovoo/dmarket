@@ -229,6 +229,12 @@ This trust is the same as the marketplace owner had pre-transfer, just wrapped i
 
 First real Kleros V2 dispute escalated through this adapter: **case #34** on `v2-testnet.kleros.builders`.
 
+### 4.7 Frontend + Indexer Integration
+
+The v3.2 order detail page (`/orders/v3_2/[chainId]/[marketplaceAddress]/[onChainOrderId]`) surfaces the adapter end-to-end. Buyer / seller see role-gated lifecycle buttons (`Cancel order`, `Mark shipped`, `Confirm received`, `Open dispute`) on the corresponding state, and once an order moves to `Disputed` the dedicated Kleros section renders one of three views: **Dispute open** (with arbitration cost + `Escalate to Kleros` button), **Awaiting Kleros ruling** (with disputeId + deep link to `v2-testnet.kleros.builders`), or **Kleros has ruled — applying to marketplace** (with `Apply ruling now` button that becomes enabled once marketplace's 3-day dispute timelock elapses). Pre-Phase-H.2 the page rendered as read-only; Phase H.2 wires every action through `wagmi.useWriteContract`.
+
+Adapter state is also mirrored into the database. A second indexer pass (`npm run indexer:v3_2:kleros` / `:once`, also wired into the unified `npm run indexer` daemon) watches the adapter contract and writes `klerosDisputeId`, `disputeEscalatedAt`, `klerosRuling`, `klerosRuledAt` onto the corresponding `OnChainOrderV3_2` row. The cursor lives in its own `IndexerStateV3_2KlerosAdapter` table so the adapter stream can be re-played independently of the marketplace stream. The health endpoint at `/api/indexer/status` returns a `v3_2_kleros` field with `lastIndexedBlock`, `lagBlocks`, `lagSeconds`, `escalatedCount`, `ruledCount` — enough for an operator to confirm at a glance that adapter events are being ingested as Kleros disputes evolve.
+
 ## 5. Interfaces and events
 
 ### 4.1 `EscrowMarketplaceERC20`

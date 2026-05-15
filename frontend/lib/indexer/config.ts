@@ -54,6 +54,24 @@ function chainHasV3_2Configured(chainId: number): boolean {
 const ALL_CANDIDATE_V3_2_CHAINS = [arbitrumSepolia.id] as const;
 export const INDEXED_V3_2_CHAIN_IDS = ALL_CANDIDATE_V3_2_CHAINS.filter(chainHasV3_2Configured) as readonly number[];
 
+// Chains where the v3.2 Kleros adapter indexer is active. Requires both
+// the marketplace AND the adapter env vars — the adapter mirror is
+// useless without the marketplace rows it writes into.
+function chainHasV3_2KlerosConfigured(chainId: number): boolean {
+  if (!chainHasV3_2Configured(chainId)) return false;
+  if (chainId === arbitrumSepolia.id) {
+    return Boolean(
+      process.env.NEXT_PUBLIC_V3_2_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS ??
+        process.env.V3_2_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS
+    );
+  }
+  return false;
+}
+
+export const INDEXED_V3_2_KLEROS_CHAIN_IDS = ALL_CANDIDATE_V3_2_CHAINS.filter(
+  chainHasV3_2KlerosConfigured
+) as readonly number[];
+
 export const DEPLOYMENT_BLOCK: Record<number, bigint> = {
   [sepolia.id]: 10835467n,
   [polygonAmoy.id]: 38206485n,
@@ -80,6 +98,13 @@ export const DEPLOYMENT_BLOCK_V3_1: Record<number, bigint> = {
 // INDEXER_V3_2_ARBSEPOLIA_FROM_BLOCK when starting fresh on a later block.
 export const DEPLOYMENT_BLOCK_V3_2: Record<number, bigint> = {
   [arbitrumSepolia.id]: readPositiveBigIntEnv("INDEXER_V3_2_ARBSEPOLIA_FROM_BLOCK", 268_684_569n)
+};
+
+// v3.2 Kleros adapter was deployed at block 268_719_717 on Arbitrum Sepolia
+// (Phase H.1). Defaulting one block earlier. Override with
+// INDEXER_V3_2_KLEROS_ARBSEPOLIA_FROM_BLOCK if you redeploy the adapter.
+export const DEPLOYMENT_BLOCK_V3_2_KLEROS: Record<number, bigint> = {
+  [arbitrumSepolia.id]: readPositiveBigIntEnv("INDEXER_V3_2_KLEROS_ARBSEPOLIA_FROM_BLOCK", 268_719_716n)
 };
 
 export const INDEXER_CHUNK_SIZE_BLOCKS = readPositiveBigIntEnv("INDEXER_CHUNK_SIZE_BLOCKS", 5000n);
@@ -207,6 +232,24 @@ export function getIndexerV3_2MarketplaceAddress(chainId: number): Address {
   }
 
   throw new Error(`V3.2 indexer is not enabled for chain ${chainId}`);
+}
+
+// v3.2 Kleros adapter address resolver. Same shape as the marketplace
+// resolver. Callers must gate on INDEXED_V3_2_KLEROS_CHAIN_IDS.
+export function getIndexerV3_2KlerosAdapterAddress(chainId: number): Address {
+  if (chainId === arbitrumSepolia.id) {
+    const address =
+      (process.env.NEXT_PUBLIC_V3_2_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS as Address | undefined) ??
+      (process.env.V3_2_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS as Address | undefined);
+
+    if (!address) {
+      throw new Error("V3.2 Kleros adapter not configured on arbitrumSepolia");
+    }
+
+    return address;
+  }
+
+  throw new Error(`V3.2 Kleros indexer is not enabled for chain ${chainId}`);
 }
 
 export function getIndexerEvidenceRegistryAddress(chainId: number): Address | undefined {

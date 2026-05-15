@@ -128,6 +128,14 @@ npx hardhat run scripts/smokeKlerosV3_2.ts --network arbitrumSepolia
 
 It prints the Kleros case URL — useful for confirming the dispute appears on `v2-testnet.kleros.builders`.
 
+Initial catch-up of the adapter event stream (mirrors `klerosDisputeId`, `disputeEscalatedAt`, `klerosRuling`, `klerosRuledAt` onto `OnChainOrderV3_2` rows):
+
+```bash
+npm run indexer:v3_2:kleros:once
+```
+
+The cursor for this stream lives in `IndexerStateV3_2KlerosAdapter` and is independent of the marketplace cursor, so a future adapter re-deploy can backfill cleanly without touching the marketplace rows.
+
 ## 3. Day-to-day operations
 
 ### 3.1 Indexer
@@ -146,7 +154,14 @@ npm run indexer:v3_2          # daemon
 npm run indexer:v3_2:once     # single pass
 ```
 
-Both honour `INDEXER_CHUNK_SIZE_BLOCKS`, `INDEXER_REQUEST_DELAY_MS`, and the `INDEXER_V3_2_ARBSEPOLIA_FROM_BLOCK` override.
+The v3.2 Kleros adapter is a **separate, parallel** indexer stream — same cadence (`INDEXER_POLL_INTERVAL_MS`), independent cursor (`IndexerStateV3_2KlerosAdapter`), independent deploy / re-deploy lifecycle. A failure in this stream does NOT abort the marketplace stream.
+
+```bash
+npm run indexer:v3_2:kleros          # daemon
+npm run indexer:v3_2:kleros:once     # single pass
+```
+
+Override the adapter's deploy-block start with `INDEXER_V3_2_KLEROS_ARBSEPOLIA_FROM_BLOCK` when running fresh on a redeployed adapter. All three streams (v3.2 marketplace, v3.2 Kleros, plus v3/v3.1) honour the global `INDEXER_CHUNK_SIZE_BLOCKS` and `INDEXER_REQUEST_DELAY_MS` knobs.
 
 ### 3.2 Reputation cron
 

@@ -264,7 +264,7 @@ Vault 按裁决释放资金
 
 **关键点**：从 `openDispute` 那一刻起，平台 owner **没有任何方式**单方面挪用这笔订单的资金，除非走 Kleros 裁决回调。
 
-> v3.2 marketplace 也已接入同一 Kleros V2 仲裁器（同 chain，同 KlerosCore）；流程与上图一致，但跨过的是 `KlerosV2DisputeAdapterV3_2`（marketplace ownership 已转交给它）。详见 [`contracts/v3_2/ARCHITECTURE.md`](../contracts/v3_2/ARCHITECTURE.md) §4。
+> v3.2 完整集成 Kleros V2 仲裁——marketplace ownership 转移给 adapter，争议升级、裁决回流、indexer 镜像、UI 入口全链路 ship。详见 [`contracts/v3_2/ARCHITECTURE.md`](../contracts/v3_2/ARCHITECTURE.md)。
 
 ### 5.3 卖家声誉
 

@@ -283,6 +283,7 @@ quality issues on **already-shipped** code.
       deployed at `0x5fD98A1916600c9957914347547D94FD0A337D0f` on
       Arbitrum Sepolia; marketplace ownership transferred; first real
       Kleros V2 dispute #34 escalated.)
+  - Frontend escalation UI + Kleros DB indexer landed in v3.2.2.
 - [ ] **Seller self-publish attestation.** The "Publish update on-chain"
       button on `ReputationBadge` (full variant) is disabled with a
       Coming soon tooltip. Wiring it up means letting the seller's

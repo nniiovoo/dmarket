@@ -108,7 +108,63 @@ export const GET = withErrorBoundary(async () => {
     }
   }
 
-  return NextResponse.json({ chains: chainStatuses, v3_2 });
+  // v3.2 Kleros adapter indexer status. Same shape as v3_2 above, but
+  // counts come from the adapter mirror columns: escalatedCount =
+  // orders with klerosDisputeId set, ruledCount = orders with
+  // klerosRuling set.
+  const v3_2KlerosAdapterAddress =
+    process.env.NEXT_PUBLIC_V3_2_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS ??
+    process.env.V3_2_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS;
+
+  let v3_2_kleros: V3_2KlerosStatus | null = null;
+  if (v3_2KlerosAdapterAddress) {
+    try {
+      const client = createPublicClient({ chain: arbitrumSepolia, transport: http(arbSepoliaRpcUrl) });
+      const lowerAdapter = v3_2KlerosAdapterAddress.toLowerCase();
+      const [state, currentBlock, escalatedCount, ruledCount] = await Promise.all([
+        prisma.indexerStateV3_2KlerosAdapter.findUnique({
+          where: { chainId_adapterAddress: { chainId: arbitrumSepolia.id, adapterAddress: lowerAdapter } }
+        }),
+        client.getBlockNumber(),
+        prisma.onChainOrderV3_2.count({
+          where: { chainId: arbitrumSepolia.id, klerosDisputeId: { not: null } }
+        }),
+        prisma.onChainOrderV3_2.count({
+          where: { chainId: arbitrumSepolia.id, klerosRuling: { not: null } }
+        })
+      ]);
+      const lastIndexed = state?.lastIndexedBlock ?? 0n;
+      const lagBlocks = currentBlock > lastIndexed ? currentBlock - lastIndexed : 0n;
+      const lagSeconds = Math.round(Number(lagBlocks) * AVERAGE_BLOCK_SECONDS[arbitrumSepolia.id]);
+
+      v3_2_kleros = {
+        chainId: arbitrumSepolia.id,
+        adapterAddress: v3_2KlerosAdapterAddress,
+        lastIndexedBlock: lastIndexed.toString(),
+        currentBlock: currentBlock.toString(),
+        lagBlocks: Number(lagBlocks),
+        lagSeconds,
+        escalatedCount,
+        ruledCount,
+        status: lagBlocks > 30n ? "lagging" : lagBlocks > 5n ? "syncing" : "healthy"
+      };
+    } catch (caught) {
+      v3_2_kleros = {
+        chainId: arbitrumSepolia.id,
+        adapterAddress: v3_2KlerosAdapterAddress,
+        lastIndexedBlock: null,
+        currentBlock: null,
+        lagBlocks: null,
+        lagSeconds: null,
+        escalatedCount: null,
+        ruledCount: null,
+        status: "unknown",
+        error: caught instanceof Error ? caught.message : "Failed to read v3.2 kleros indexer status"
+      };
+    }
+  }
+
+  return NextResponse.json({ chains: chainStatuses, v3_2, v3_2_kleros });
 });
 
 type V3_2Status = {
@@ -119,6 +175,19 @@ type V3_2Status = {
   lagBlocks: number | null;
   lagSeconds: number | null;
   orderCount: number | null;
+  status: "healthy" | "syncing" | "lagging" | "unknown";
+  error?: string;
+};
+
+type V3_2KlerosStatus = {
+  chainId: number;
+  adapterAddress: string;
+  lastIndexedBlock: string | null;
+  currentBlock: string | null;
+  lagBlocks: number | null;
+  lagSeconds: number | null;
+  escalatedCount: number | null;
+  ruledCount: number | null;
   status: "healthy" | "syncing" | "lagging" | "unknown";
   error?: string;
 };

@@ -249,9 +249,16 @@ function serializeOrder(
   };
 }
 
+// Postgres Product.id is INT4; anything bigger than 2^31-1 cannot be passed
+// to prisma.product.findMany without a binding error. v3.2 smoke / demo
+// scripts have legitimately used productIds derived from Date.now() (~1.7e12),
+// which fit Number.isSafeInteger but exceed INT4. Reject those here so the
+// caller treats them as "no Product join available" and the order API still
+// returns the chain-side fields.
+const POSTGRES_INT4_MAX = 2_147_483_647;
 function toSafeProductId(value: string) {
   const id = Number(value);
-  return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+  return Number.isSafeInteger(id) && id > 0 && id <= POSTGRES_INT4_MAX ? id : undefined;
 }
 
 function toIsoString(value: Date | null) {

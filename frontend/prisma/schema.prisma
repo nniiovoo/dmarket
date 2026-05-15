@@ -136,6 +136,14 @@ model OnChainOrderV3_2 {
   shippedAt          DateTime?
   completedAt        DateTime?
   disputedAt         DateTime?
+  // Kleros V2 adapter mirror columns (Phase H.3). All nullable; populated
+  // by the independent adapter event indexer. `klerosDisputeId` is stored
+  // as TEXT because Kleros disputeIds are uint256; we never do numeric
+  // comparisons in SQL on it.
+  klerosDisputeId    String?
+  disputeEscalatedAt DateTime?
+  klerosRuling       Int? // 0 = refused → buyer (normalised), 1 = buyer, 2 = seller
+  klerosRuledAt      DateTime?
   lastEventBlock     BigInt
   lastEventTxHash    String
   lastSyncedAt       DateTime  @default(now())
@@ -144,6 +152,7 @@ model OnChainOrderV3_2 {
   @@index([buyer])
   @@index([seller])
   @@index([chainId, marketplaceAddress])
+  @@index([klerosDisputeId])
 }
 
 // Per-(chain, marketplace) catch-up cursor for the V3.2 indexer. Keyed on
@@ -157,6 +166,18 @@ model IndexerStateV3_2 {
   updatedAt          DateTime @updatedAt
 
   @@id([chainId, marketplaceAddress])
+}
+
+// Cursor for the v3.2 Kleros adapter indexer. Independent stream from the
+// marketplace indexer because the adapter is a separate contract address
+// with its own event stream and its own re-deploy lifecycle.
+model IndexerStateV3_2KlerosAdapter {
+  chainId          Int
+  adapterAddress   String
+  lastIndexedBlock BigInt
+  updatedAt        DateTime @updatedAt
+
+  @@id([chainId, adapterAddress])
 }
 
 // Signed reputation attestations issued by the platform attestor and
