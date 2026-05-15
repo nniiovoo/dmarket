@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useReadContract } from "wagmi";
 
+import { V3_2AdminSection } from "@/components/admin/V3_2AdminSection";
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { OrderBadge } from "@/components/OrderBadge";
@@ -337,6 +338,8 @@ export default function AdminPage() {
           </form>
         </Card>
       )}
+
+      {isConnected ? <V3_2AdminSection /> : null}
     </div>
   );
 }

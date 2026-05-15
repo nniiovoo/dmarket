@@ -29,6 +29,14 @@ const abiTargets = [
   {
     artifact: "artifacts/contracts/v3_1/EscrowMarketplaceV3_1.sol/EscrowMarketplaceV3_1.json",
     output: "frontend/abi/EscrowMarketplaceV3_1.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3_2/EscrowMarketplaceERC20.sol/EscrowMarketplaceERC20.json",
+    output: "frontend/abi/EscrowMarketplaceERC20.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3_2/ReputationRegistry.sol/ReputationRegistry.json",
+    output: "frontend/abi/ReputationRegistry.json"
   }
 ];
 

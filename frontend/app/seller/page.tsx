@@ -7,6 +7,7 @@ import { useAccount } from "wagmi";
 
 import { Card, EmptyState } from "@/components/Card";
 import { NetworkNotice } from "@/components/NetworkNotice";
+import { ReputationBadge } from "@/components/reputation/ReputationBadge";
 import { AllOrdersList } from "@/components/seller/AllOrdersList";
 import { MyProductsList } from "@/components/seller/MyProductsList";
 import { PendingOrdersList } from "@/components/seller/PendingOrdersList";
@@ -44,6 +45,14 @@ export default function SellerDashboardPage() {
           New product
         </Link>
       </div>
+
+      {isConnected && address ? (
+        <ReputationBadge sellerAddress={address} variant="full" showRefreshButton />
+      ) : (
+        <Card>
+          <EmptyState title="Reputation unavailable" body="Connect wallet to see your reputation." />
+        </Card>
+      )}
 
       <Card>
         {!isConnected ? (

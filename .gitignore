@@ -21,3 +21,8 @@ frontend/tsconfig.tsbuildinfo
 
 # Private dispute evidence files (local-FS storage backend).
 frontend/evidence-uploads/
+
+# Ruflo / claude-flow tool caches (not part of the project)
+.claude-flow/
+ruvector.db
+frontend/ruvector.db

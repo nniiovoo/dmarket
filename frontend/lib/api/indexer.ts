@@ -7,8 +7,21 @@ export type IndexerChainStatus = {
   error?: string;
 };
 
+export type IndexerV3_2Status = {
+  chainId: number;
+  marketplaceAddress: string;
+  lastIndexedBlock: string | null;
+  currentBlock: string | null;
+  lagBlocks: number | null;
+  lagSeconds: number | null;
+  orderCount: number | null;
+  status: "healthy" | "syncing" | "lagging" | "unknown";
+  error?: string;
+};
+
 export type IndexerStatusResponse = {
   chains: IndexerChainStatus[];
+  v3_2: IndexerV3_2Status | null;
 };
 
 export async function fetchIndexerStatus() {

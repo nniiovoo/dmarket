@@ -30,6 +30,17 @@ export async function fetchOrder(chainId: number, onChainOrderId: string) {
   return parseJson<ApiOrder>(response);
 }
 
+export async function fetchOrderV3_2(
+  chainId: number,
+  marketplaceAddress: string,
+  onChainOrderId: string
+) {
+  const response = await fetch(
+    `/api/orders/v3_2/${chainId}/${marketplaceAddress}/${onChainOrderId}`
+  );
+  return parseJson<ApiOrder>(response);
+}
+
 async function parseJson<T extends object>(response: Response) {
   const data = (await response.json()) as T | { error?: string; details?: unknown };
 

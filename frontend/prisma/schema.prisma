@@ -104,6 +104,97 @@ model IndexerStateV3_1 {
   updatedAt DateTime @updatedAt
 }
 
+// V3.2 orders live in a parallel marketplace (`EscrowMarketplaceERC20`) that
+// custodies funds itself and carries an ERC-20 payment token per order. The
+// model is intentionally NOT a subclass / reuse of OnChainOrderV3_1:
+//   - v3.2 adds `paymentToken`; making the v3.1 column nullable would force
+//     every reader to branch on "is this v3.2 in disguise?", losing the
+//     clarity the typed models give us.
+//   - the unique key is `(chainId, marketplaceAddress, onChainOrderId)` —
+//     v3 and v3.2 share an orderId space, so the v3.1-style two-column key
+//     would collide. Carrying the marketplace address explicitly removes
+//     the ambiguity for the lifetime of the row.
+//   - status is an Int (matches the on-chain enum 0..6) rather than a label
+//     string; downstream code can reuse the existing OrderStatus enum
+//     without a parser. The trade-off is a 1-arg integer in DB tools, but
+//     mappings are stable and small.
+// No cascade delete: order rows are an audit artefact and should outlive
+// product / user deletions.
+model OnChainOrderV3_2 {
+  id                 String    @id @default(cuid())
+  chainId            Int
+  marketplaceAddress String
+  onChainOrderId     String
+  buyer              String
+  seller             String
+  paymentToken       String // address(0) for native; else ERC-20 address
+  productId          String
+  amount             String // wei (native) or token base units (ERC-20)
+  status             Int // 0..6 (Created / Paid / Shipped / Completed / Cancelled / Disputed / Refunded)
+  createdAt          DateTime
+  paidAt             DateTime?
+  shippedAt          DateTime?
+  completedAt        DateTime?
+  disputedAt         DateTime?
+  lastEventBlock     BigInt
+  lastEventTxHash    String
+  lastSyncedAt       DateTime  @default(now())
+
+  @@unique([chainId, marketplaceAddress, onChainOrderId])
+  @@index([buyer])
+  @@index([seller])
+  @@index([chainId, marketplaceAddress])
+}
+
+// Per-(chain, marketplace) catch-up cursor for the V3.2 indexer. Keyed on
+// the marketplace address as well so a future second v3.2 deployment on
+// the same chain (or a re-deploy after testing) doesn't share state.
+model IndexerStateV3_2 {
+  chainId            Int
+  marketplaceAddress String
+  lastBlock          BigInt
+  lastLogIndex       Int      @default(-1)
+  updatedAt          DateTime @updatedAt
+
+  @@id([chainId, marketplaceAddress])
+}
+
+// Signed reputation attestations issued by the platform attestor and
+// (eventually) recorded on-chain via ReputationRegistry.recordAttestation.
+// One row per (subject, version) pair — version is monotonic per subject
+// in the contract, so the unique constraint here mirrors the on-chain
+// replay-prevention invariant. The row may exist with txHash=null when an
+// attestation has been signed but not yet published.
+model PublishedAttestation {
+  id           String    @id @default(cuid())
+  subject      String // lowercased seller address
+  score        Int
+  issuedAt     DateTime
+  expiry       DateTime
+  version      Int
+  signature    String
+  chainId      Int
+  registryAddr String // checksummed
+  txHash       String?
+  publishedAt  DateTime?
+
+  @@unique([subject, version])
+  @@index([subject])
+}
+
+// Sellers flagged by the indexer for an out-of-band reputation refresh
+// (after Completed / Refunded / DisputeResolved). The cron sweeps this
+// table, runs computeSellerScore + issueAttestation + publishAttestation,
+// then writes processedAt to signal completion. processedAt=null means
+// "still pending".
+model ReputationRefreshQueue {
+  subject     String    @id // lowercased seller address
+  queuedAt    DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([processedAt])
+}
+
 model User {
   walletAddress String   @id
   email         String?

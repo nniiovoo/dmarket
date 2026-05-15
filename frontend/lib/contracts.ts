@@ -153,11 +153,15 @@ export function getV3_1ContractAddresses(chainId: number | undefined): V3_1Contr
 
 // Picks the right EvidenceRegistry instance for the order. V3 and V3.1 have
 // separate registries; submitting a V3.1 order's evidence to the V3
-// registry would revert (registry's marketplace() check fails).
+// registry would revert (registry's marketplace() check fails). v3.2 has
+// no EvidenceRegistry wired up yet (Phase D territory) — return undefined.
 export function getEvidenceRegistryForOrder(order: {
   chainId: number;
-  marketplaceVersion: "v3" | "v3.1";
+  marketplaceVersion: "v3" | "v3.1" | "v3.2";
 }): Address | undefined {
+  if (order.marketplaceVersion === "v3.2") {
+    return undefined;
+  }
   if (order.marketplaceVersion === "v3.1") {
     return getV3_1ContractAddresses(order.chainId)?.evidenceRegistry;
   }

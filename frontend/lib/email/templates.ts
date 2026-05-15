@@ -24,11 +24,14 @@ export type NotificationTemplate = {
 
 export function renderNotification(kind: NotificationKind, order: ApiOrder): NotificationTemplate {
   const productName = order.product?.name ?? `Product #${order.productId}`;
-  // V3 lives at /orders, V3.1 at /v3_1/orders. We deliberately keep the
-  // human-facing subject/body identical so users don't learn (or care)
-  // about the marketplace version distinction.
-  const orderPath = order.marketplaceVersion === "v3.1" ? "/v3_1/orders" : "/orders";
-  const orderUrl = `${appBaseUrl()}${orderPath}/${order.onChainOrderId}?chainId=${order.chainId}`;
+  // V3 lives at /orders, V3.1 at /v3_1/orders, v3.2 at
+  // /orders/v3_2/<chainId>/<marketplace>/<orderId>. We deliberately keep
+  // the human-facing subject/body identical so users don't learn (or
+  // care) about the marketplace version distinction.
+  const orderUrl =
+    order.marketplaceVersion === "v3.2" && order.marketplaceAddress
+      ? `${appBaseUrl()}/orders/v3_2/${order.chainId}/${order.marketplaceAddress}/${order.onChainOrderId}`
+      : `${appBaseUrl()}${order.marketplaceVersion === "v3.1" ? "/v3_1/orders" : "/orders"}/${order.onChainOrderId}?chainId=${order.chainId}`;
   const explorerUrl = getExplorerTxUrl(order.chainId, order.lastTxHash ?? undefined);
   const amount = safeFormatEther(order.amountWei);
   const common = {

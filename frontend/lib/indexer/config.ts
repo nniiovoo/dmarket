@@ -38,6 +38,22 @@ function chainHasV3_1Configured(chainId: number): boolean {
 const ALL_CANDIDATE_V3_1_CHAINS = [arbitrumSepolia.id] as const;
 export const INDEXED_V3_1_CHAIN_IDS = ALL_CANDIDATE_V3_1_CHAINS.filter(chainHasV3_1Configured) as readonly number[];
 
+// Chains the V3.2 ERC-20 marketplace indexer should watch. V3.2 is only
+// deployed on Arbitrum Sepolia today and only joins the indexed set when
+// its marketplace env var is configured.
+function chainHasV3_2Configured(chainId: number): boolean {
+  if (chainId === arbitrumSepolia.id) {
+    return Boolean(
+      process.env.NEXT_PUBLIC_V3_2_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS ??
+        process.env.V3_2_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS
+    );
+  }
+  return false;
+}
+
+const ALL_CANDIDATE_V3_2_CHAINS = [arbitrumSepolia.id] as const;
+export const INDEXED_V3_2_CHAIN_IDS = ALL_CANDIDATE_V3_2_CHAINS.filter(chainHasV3_2Configured) as readonly number[];
+
 export const DEPLOYMENT_BLOCK: Record<number, bigint> = {
   [sepolia.id]: 10835467n,
   [polygonAmoy.id]: 38206485n,
@@ -56,6 +72,14 @@ export const DEPLOYMENT_BLOCK: Record<number, bigint> = {
 // expected way to point the indexer at a recent block when starting fresh.
 export const DEPLOYMENT_BLOCK_V3_1: Record<number, bigint> = {
   [arbitrumSepolia.id]: readPositiveBigIntEnv("INDEXER_V3_1_ARBSEPOLIA_FROM_BLOCK", 268278000n)
+};
+
+// V3.2 marketplace creation tx is at block 268_684_570 on Arbitrum Sepolia
+// (Phase A deploy). Defaulting one block earlier so a fresh indexer picks
+// up the creation log itself if anything ever queries it. Override with
+// INDEXER_V3_2_ARBSEPOLIA_FROM_BLOCK when starting fresh on a later block.
+export const DEPLOYMENT_BLOCK_V3_2: Record<number, bigint> = {
+  [arbitrumSepolia.id]: readPositiveBigIntEnv("INDEXER_V3_2_ARBSEPOLIA_FROM_BLOCK", 268_684_569n)
 };
 
 export const INDEXER_CHUNK_SIZE_BLOCKS = readPositiveBigIntEnv("INDEXER_CHUNK_SIZE_BLOCKS", 5000n);
@@ -166,6 +190,23 @@ export function getIndexerV3_1MarketplaceAddress(chainId: number): Address {
   }
 
   throw new Error(`V3.1 indexer is not enabled for chain ${chainId}`);
+}
+
+// V3.2 marketplace address resolver. Same shape as V3.1.
+export function getIndexerV3_2MarketplaceAddress(chainId: number): Address {
+  if (chainId === arbitrumSepolia.id) {
+    const address =
+      (process.env.NEXT_PUBLIC_V3_2_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS as Address | undefined) ??
+      (process.env.V3_2_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS as Address | undefined);
+
+    if (!address) {
+      throw new Error("V3.2 marketplace not configured on arbitrumSepolia");
+    }
+
+    return address;
+  }
+
+  throw new Error(`V3.2 indexer is not enabled for chain ${chainId}`);
 }
 
 export function getIndexerEvidenceRegistryAddress(chainId: number): Address | undefined {

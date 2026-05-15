@@ -7,10 +7,19 @@ import { formatEther, parseEther } from "viem";
 import { useAccount, useSignMessage } from "wagmi";
 
 import { BuyNowButton } from "@/components/BuyNowButton";
+import { BuyNowERC20Button } from "@/components/BuyNowERC20Button";
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
 import { ContactSellerButton } from "@/components/messages/ContactSellerButton";
+import {
+  PaymentTokenPicker,
+  convertEthWeiToToken,
+  type PaymentMode
+} from "@/components/PaymentTokenPicker";
+import { ReputationBadge } from "@/components/reputation/ReputationBadge";
 import { fetchProduct, updateProduct, deleteProduct, type Product } from "@/lib/api/products";
+import { PRIMARY_CHAIN_ID } from "@/lib/chains";
 import { sameAddress } from "@/lib/order";
+import type { Address } from "viem";
 
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>();
@@ -28,6 +37,7 @@ export default function ProductDetailPage() {
   const [description, setDescription] = useState("");
   const [priceEth, setPriceEth] = useState("");
   const [imageUrl, setImageUrl] = useState("");
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>({ kind: "native" });
 
   const isSeller = sameAddress(address, product?.sellerAddress);
 
@@ -153,7 +163,13 @@ export default function ProductDetailPage() {
           <div className="mt-5 space-y-3 text-sm">
             <p className="text-slate-700">{product.description || "No description."}</p>
             <Info label="Product ID" value={String(product.id)} />
-            <Info label="Seller" value={product.sellerAddress} />
+            <div>
+              <p className="text-xs font-medium uppercase text-slate-400">Seller</p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                <p className="break-all text-slate-700">{product.sellerAddress}</p>
+                <ReputationBadge sellerAddress={product.sellerAddress as Address} variant="compact" />
+              </div>
+            </div>
             <Info label="Chain ID" value={String(product.chainId)} />
             <Info label="Status" value={product.status} />
             <Info label="Price" value={`${formatEther(BigInt(product.priceWei))} ETH / MATIC`} />
@@ -169,14 +185,33 @@ export default function ProductDetailPage() {
             ) : product.status !== "active" ? (
               <p className="mt-4 rounded-md bg-slate-50 p-3 text-sm text-slate-600">This product is not available for purchase.</p>
             ) : (
-              <BuyNowButton
-                seller={product.sellerAddress}
-                productId={BigInt(product.id)}
-                priceEth={formatEther(BigInt(product.priceWei))}
-                productName={product.name}
-                productImageUrl={product.imageUrl}
-                productStatus={product.status}
-              />
+              <>
+                <PaymentTokenPicker
+                  chainId={PRIMARY_CHAIN_ID}
+                  value={paymentMode}
+                  onChange={setPaymentMode}
+                  productPriceInWei={BigInt(product.priceWei)}
+                />
+                {paymentMode.kind === "native" ? (
+                  <BuyNowButton
+                    seller={product.sellerAddress}
+                    productId={BigInt(product.id)}
+                    priceEth={formatEther(BigInt(product.priceWei))}
+                    productName={product.name}
+                    productImageUrl={product.imageUrl}
+                    productStatus={product.status}
+                    label={`Buy with ETH (${formatEther(BigInt(product.priceWei))} ETH)`}
+                  />
+                ) : (
+                  <BuyNowERC20Button
+                    seller={product.sellerAddress as Address}
+                    productId={BigInt(product.id)}
+                    token={paymentMode.token}
+                    amount={convertEthWeiToToken(BigInt(product.priceWei), paymentMode.token)}
+                    productName={product.name}
+                  />
+                )}
+              </>
             )}
             <Link
               href={`/create?${new URLSearchParams({

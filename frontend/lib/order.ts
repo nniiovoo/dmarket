@@ -23,6 +23,9 @@ export type OrderView = {
   amount: bigint;
   shippedAt: bigint;
   completedAt: bigint;
+  // v3.2 marketplaces carry the payment token directly on the order. For
+  // native or v2/v3/v3.1 orders this stays undefined / address(0).
+  paymentToken?: Address;
 };
 
 export function normalizeOrder(raw: unknown): OrderView | undefined {

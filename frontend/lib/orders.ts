@@ -5,7 +5,23 @@ export type OrderStatusName = "Created" | "Paid" | "Shipped" | "Completed" | "Ca
 // Which marketplace contract this order lives in. Email templates and the
 // order detail link use this to pick the right URL ("/orders/..." for V3,
 // "/v3_1/orders/..." for V3.1).
-export type MarketplaceVersion = "v3" | "v3.1";
+export type MarketplaceVersion = "v3" | "v3.1" | "v3.2";
+
+// Status int → human label. Mirrors the on-chain OrderStatus enum and the
+// v3.2 schema's `status` Int column.
+const STATUS_NAMES: OrderStatusName[] = [
+  "Created",
+  "Paid",
+  "Shipped",
+  "Completed",
+  "Cancelled",
+  "Disputed",
+  "Refunded"
+];
+
+export function orderStatusName(value: number): OrderStatusName {
+  return STATUS_NAMES[value] ?? "Created";
+}
 
 export type ProductSummary = {
   id: number;
@@ -36,6 +52,10 @@ export type ApiOrder = {
   lastTxHash: string | null;
   product: ProductSummary | null;
   marketplaceVersion: MarketplaceVersion;
+  // Present only for v3.2 orders. For v3/v3.1 these stay undefined and the
+  // payment is implicitly native.
+  paymentToken?: string;
+  marketplaceAddress?: string;
 };
 
 export async function listOrders(params: {
@@ -98,6 +118,63 @@ export async function getOrder(
 
 export function needsSellerAction(order: Pick<ApiOrder, "status">) {
   return order.status === "Paid";
+}
+
+// v3.2 lookup. Keyed on (chainId, marketplaceAddress, onChainOrderId) so
+// orders from a redeploy or a parallel v3.2 marketplace don't collide. The
+// caller is expected to pass the lowercased marketplace address; we lowercase
+// again here defensively.
+export async function getOrderV3_2(
+  chainId: number,
+  marketplaceAddress: string,
+  onChainOrderId: string
+): Promise<ApiOrder | null> {
+  const lowerAddress = marketplaceAddress.toLowerCase();
+  const order = await prisma.onChainOrderV3_2.findUnique({
+    where: {
+      chainId_marketplaceAddress_onChainOrderId: {
+        chainId,
+        marketplaceAddress: lowerAddress,
+        onChainOrderId
+      }
+    }
+  });
+
+  if (!order) return null;
+
+  const products = await findProductsForOrders([{ productId: order.productId }]);
+  const product = products.get(order.productId) ?? null;
+
+  return {
+    chainId: order.chainId,
+    onChainOrderId: order.onChainOrderId,
+    buyer: order.buyer,
+    seller: order.seller,
+    productId: order.productId,
+    amountWei: order.amount,
+    status: orderStatusName(order.status),
+    createdAt: toIsoString(order.createdAt),
+    paidAt: toIsoString(order.paidAt),
+    shippedAt: toIsoString(order.shippedAt),
+    completedAt: toIsoString(order.completedAt),
+    // v3.2 doesn't have a separate refundedAt column — it only flips status
+    // to Refunded when resolveDispute(refundBuyer=true) fires. Use the
+    // resolution time stored in disputedAt's slot? No — disputedAt is the
+    // *open* timestamp. Leave refundedAt null; if Phase D needs it we add
+    // a column then rather than synthesise it here.
+    refundedAt: null,
+    disputedAt: toIsoString(order.disputedAt),
+    carrier: null,
+    trackingNumber: null,
+    trackingUrl: null,
+    shippingNote: null,
+    shippingUpdatedAt: null,
+    lastTxHash: order.lastEventTxHash,
+    product,
+    marketplaceVersion: "v3.2",
+    paymentToken: order.paymentToken,
+    marketplaceAddress: order.marketplaceAddress
+  };
 }
 
 async function findProductsForOrders(orders: Array<{ productId: string }>) {

@@ -79,10 +79,11 @@ All of these are net-new services we have not started:
       transitions
 - [x] **Payment service** — ETH / MATIC via wallet; createAndPayWithAuth
       (V3.1 single-sig); LI.FI cross-chain entry
-- [ ] **Stablecoin settlement (USDC / USDT / DAI).** Currently only
-      native gas tokens. Critical for non-crypto-native buyers. Needs
-      escrow contract upgrade to accept ERC-20 alongside native, or a
-      wrapper. *Est: 1-2 weeks including contract upgrade + tests.*
+- [x] **Stablecoin settlement (USDC / USDT / DAI).** v3.2 lane on Arbitrum
+      Sepolia (`EscrowMarketplaceERC20`) accepts any ERC-20 the contract
+      owner adds via `setAcceptedToken`. Currently mUSD (a test token)
+      is registered; USDC / USDT / DAI on mainnet only need an
+      allowlist tx after audit. Native path is unchanged.
 - [x] **Notification service** — Resend email pipeline, per-kind dedup,
       email-on-status-change
 - [ ] **Push notifications** — mobile / browser push. Wait until we have
@@ -100,16 +101,22 @@ All of these are net-new services we have not started:
 - [x] **Escrow contract** — V2 + V3 (Arbitrum Sepolia) + V3.1
 - [x] **Order management** — lifecycle, status transitions
 - [x] **Payment settlement** — ETH/MATIC; cross-chain via LI.FI relayer
-- [ ] **Stablecoin settlement on-chain** — see 1.4
+- [x] **Stablecoin settlement on-chain** — see 1.4
 - [x] **Dispute contract** — open / resolve / refund flows
 - [x] **Evidence registry** — V3 + V3.1 (separate deployments)
 - [x] **Arbitration (Kleros V2)** — adapter wired for V3 on Arbitrum
       Sepolia
 - [ ] **Kleros adapter for V3.1.** Same wiring as V3, just hasn't been
       deployed. *Est: 2-3 days.*
-- [ ] **Reputation contract (on-chain).** Stores seller score signed
-      off-chain by the platform; allows portable reputation across
-      marketplaces. *Est: 1 week including tests.*
+- [x] **Reputation contract (on-chain).** v3.2 `ReputationRegistry` is
+      live on Arbitrum Sepolia. Score is computed off-chain over all
+      marketplace lanes (`OnChainOrder` / `OnChainOrderV3_1` /
+      `OnChainOrderV3_2`), the platform attestor signs an EIP-712
+      `Attestation` (`subject, score, issuedAt, expiry, version`), and
+      the registry stores the latest version per subject with monotonic
+      replay protection. 2-step signer rotation via
+      `setPendingSigner` / `acceptSigner`. See
+      `contracts/v3_2/ARCHITECTURE.md`.
 - [ ] **Seller bond / staking contract.** Sellers post a refundable
       bond to list; bond slashable on confirmed dispute outcomes.
       *Est: 1 week.*
@@ -157,9 +164,14 @@ All of these are net-new services we have not started:
 
 ### 1.8 Risk control system (~5%)
 
-- [ ] **Credit / reputation rating** — visible buyer/seller score
-      computed from on-chain history. Overlaps with the reputation
-      engine in 1.3. *Est: 1 week.*
+- [x] **Credit / reputation rating** — MVP done. Score computed by
+      `frontend/lib/reputation/score.ts` (v0 formula: base 500 ±
+      completed-bonus, dispute / refund penalty, fulfilment lateness,
+      account age bonus, capped 0..1000; sentinel 500 when
+      `sampleSize < 5`). Visible as `ReputationBadge` on product /
+      seller / order pages. Coefficients and `MIN_SAMPLE_SIZE` are
+      tunable consts — leave alone until real-world data argues
+      otherwise.
 - [ ] **Risk rules engine** — declarative rules: "if seller's 30-day
       dispute rate > 5%, require additional confirmation step". *Est:
       1-2 weeks.*
@@ -171,6 +183,36 @@ All of these are net-new services we have not started:
 - [ ] **Blacklist** — seller / buyer / chain-address. We have
       `EVIDENCE_ADMIN_ADDRESSES` env for the inverse (allowlist); need
       the inverse. *Est: 4-5 days.*
+
+### 1.9 v3.2 完成情况快照 (2026-05-15)
+
+v3.2 closes the "stablecoin settlement + portable on-chain reputation"
+slice of the roadmap, end-to-end, on Arbitrum Sepolia:
+
+- `EscrowMarketplaceERC20` — parallel marketplace that custodies funds
+  itself (no separate Vault) and accepts native or any allowlisted
+  ERC-20. Same 7-status lifecycle as v2 / v3.
+- `ReputationRegistry` — EIP-712 attestation store, monotonic version,
+  2-step signer rotation. Score formula is off-chain; the contract only
+  verifies signatures + version + expiry.
+- Indexer + Postgres schema (`OnChainOrderV3_2`, `IndexerStateV3_2`,
+  `PublishedAttestation`, `ReputationRefreshQueue`) decoupled from v3 /
+  v3.1 tables; `(chainId, marketplaceAddress, onChainOrderId)` is the
+  unique key so v3 / v3.2 orderId collisions are physically impossible.
+- Frontend URL `/orders/v3_2/[chainId]/[marketplace]/[orderId]`.
+  Reputation badges render on product / seller / order pages. Admin
+  dashboard exposes accepted-token allowlist, signer rotation, and the
+  refresh-queue drain action.
+- A demo seller has 8 Completed v3.2 orders + an on-chain attestation
+  with `score=739, version=1`.
+
+What's deliberately deferred (tracked in §2 carry-over below):
+
+- Kleros adapter for v3.2
+- Seller self-publish path for attestations (admin / cron publishes today)
+- Email notifications for v3.2 events
+- Evidence flow for v3.2 orders
+- Shipping API / 17track integration on the v3.2 order page
 
 ---
 
@@ -232,6 +274,44 @@ quality issues on **already-shipped** code.
 - [ ] **Indexer cron / supervisor.** Currently the V3 + V3.1 indexers
       need to be started manually (`npm run indexer`). Should run as a
       systemd service / k8s sidecar in production. *Est: 4-5 hours.*
+
+#### v3.2 follow-ups (from Phase A–G work)
+
+- [ ] **Kleros 仲裁 adapter for v3.2.** The contract has the same
+      `openDispute` / `resolveDispute` surface as v3, so the adapter
+      pattern from `KlerosV2DisputeAdapter` carries over. Not deployed
+      yet. *Est: 2-3 days.*
+- [ ] **Seller self-publish attestation.** The "Publish update on-chain"
+      button on `ReputationBadge` (full variant) is disabled with a
+      Coming soon tooltip. Wiring it up means letting the seller's
+      wallet send `recordAttestation` themselves (calldata builder
+      already exists in `publisher.ts`). *Est: 4-5 hours.*
+- [ ] **Email notifications for v3.2.** `applyEventV3_2` does not call
+      `queueNotification` like the v3 / v3.1 paths do. Wire `OrderPaid`
+      / `OrderShipped` / `OrderCompleted` / `OrderDisputed` /
+      `OrderRefunded` and tag with `marketplaceVersion="v3.2"` so the
+      24h dedup key doesn't collide. *Est: 3-4 hours.*
+- [ ] **Evidence flow for v3.2.** v3.2 doesn't yet have an
+      EvidenceRegistry instance; the order detail page intentionally
+      skips `<EvidenceSection />`. Either deploy a v3.2 registry or
+      retarget the v3.1 one with marketplace-aware permission checks.
+      *Est: 1 week including a fresh registry deploy.*
+- [ ] **Shipping API / 17track integration on v3.2.** The v3.2 order
+      detail page does not surface `TrackingLink` or
+      `ShipWithTrackingDialog`. The data path exists (the same shipping
+      columns are already absent from `OnChainOrderV3_2`; would need a
+      separate table or a column add). *Est: 4-5 days.*
+- [ ] **Reputation `MIN_SAMPLE_SIZE` / formula coefficient tuning.**
+      Constants in `frontend/lib/reputation/score.ts` are picked from a
+      back-of-envelope feel. Once we have order volume from real
+      sellers, replay-fit the formula against expected risk outcomes.
+      *Est: ongoing.*
+- [ ] **`PublishedAttestation` `version` is `Int`** but the on-chain
+      column is `uint8`. The issuer hard-caps at 255 today; once a
+      seller approaches that, the schema needs a redesign (probably
+      `(subject, registryAddr, version)` as the unique key + an
+      explicit overflow handler). *Est: 1 day when a subject reaches
+      v200+.*
 
 ### 2.4 P3 — Nice-to-have UX
 

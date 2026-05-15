@@ -1,15 +1,20 @@
 import { prisma } from "../lib/db";
 import { catchUp } from "../lib/indexer/catchUp";
 import { catchUpV3_1 } from "../lib/indexer/catchUpV3_1";
+import { catchUpV3_2 } from "../lib/indexer/catchUpV3_2";
 import {
   DEPLOYMENT_BLOCK,
   DEPLOYMENT_BLOCK_V3_1,
+  DEPLOYMENT_BLOCK_V3_2,
+  getIndexerV3_2MarketplaceAddress,
   INDEXED_CHAIN_IDS,
   INDEXED_V3_1_CHAIN_IDS,
+  INDEXED_V3_2_CHAIN_IDS,
   INDEXER_POLL_INTERVAL_MS
 } from "../lib/indexer/config";
 import { liveWatch } from "../lib/indexer/liveWatch";
 import { liveWatchV3_1 } from "../lib/indexer/liveWatchV3_1";
+import { liveWatchV3_2 } from "../lib/indexer/liveWatchV3_2";
 
 const once = process.argv.includes("--once");
 
@@ -35,6 +40,16 @@ async function main() {
     }
   }
 
+  // V3.2 catch-up — parallel marketplace with its own cursor keyed on
+  // (chainId, marketplaceAddress). Writes go to OnChainOrderV3_2.
+  for (const chainId of INDEXED_V3_2_CHAIN_IDS) {
+    try {
+      await catchUpV3_2FromState(chainId);
+    } catch (error) {
+      console.error(`[v3.2 chain ${chainId}] initial catch-up failed, will retry on next tick`, error);
+    }
+  }
+
   if (once) {
     await prisma.$disconnect();
     return;
@@ -42,6 +57,7 @@ async function main() {
 
   const stoppers = INDEXED_CHAIN_IDS.map((chainId) => liveWatch(chainId));
   const v3_1Stoppers = INDEXED_V3_1_CHAIN_IDS.map((chainId) => liveWatchV3_1(chainId));
+  const v3_2Stoppers = INDEXED_V3_2_CHAIN_IDS.map((chainId) => liveWatchV3_2(chainId));
   const interval = setInterval(() => {
     void runPeriodicCatchUp();
   }, INDEXER_POLL_INTERVAL_MS);
@@ -50,6 +66,7 @@ async function main() {
     clearInterval(interval);
     stoppers.forEach((stop) => stop());
     v3_1Stoppers.forEach((stop) => stop());
+    v3_2Stoppers.forEach((stop) => stop());
     await prisma.$disconnect();
     process.exit(0);
   }
@@ -78,6 +95,14 @@ async function runPeriodicCatchUp() {
       console.error(`[v3.1 chain ${chainId}] periodic catch-up failed`, error);
     }
   }
+
+  for (const chainId of INDEXED_V3_2_CHAIN_IDS) {
+    try {
+      await catchUpV3_2FromState(chainId);
+    } catch (error) {
+      console.error(`[v3.2 chain ${chainId}] periodic catch-up failed`, error);
+    }
+  }
 }
 
 async function catchUpFromState(chainId: number) {
@@ -94,6 +119,17 @@ async function catchUpV3_1FromState(chainId: number) {
   const lastProcessed = await catchUpV3_1(chainId, fromBlock);
 
   console.log(`[v3.1 chain ${chainId}] caught up to block ${lastProcessed}`);
+}
+
+async function catchUpV3_2FromState(chainId: number) {
+  const marketplaceAddress = getIndexerV3_2MarketplaceAddress(chainId).toLowerCase();
+  const state = await prisma.indexerStateV3_2.findUnique({
+    where: { chainId_marketplaceAddress: { chainId, marketplaceAddress } }
+  });
+  const fromBlock = state ? state.lastBlock + 1n : DEPLOYMENT_BLOCK_V3_2[chainId];
+  const lastProcessed = await catchUpV3_2(chainId, fromBlock);
+
+  console.log(`[v3.2 chain ${chainId}] caught up to block ${lastProcessed}`);
 }
 
 main().catch(async (error) => {

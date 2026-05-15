@@ -9,12 +9,17 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"lib/**/*.test.ts\"",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
     "api:smoke": "tsx scripts/manualTestApi.ts",
     "indexer": "tsx scripts/indexer.ts",
     "indexer:once": "tsx scripts/indexer.ts --once",
+    "indexer:v3_2": "tsx scripts/indexerV3_2.ts",
+    "indexer:v3_2:once": "tsx scripts/indexerV3_2.ts --once",
+    "reputation:cron": "tsx scripts/issueAttestationsCron.ts",
+    "reputation:cron:once": "tsx scripts/issueAttestationsCron.ts --once",
     "sync-abi": "cd .. && npm run sync-abi"
   },
   "dependencies": {
