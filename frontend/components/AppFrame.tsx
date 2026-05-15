@@ -8,7 +8,7 @@ import { useAccount } from "wagmi";
 
 import { NewOrderBadge } from "@/components/seller/NewOrderBadge";
 import { WalletButton } from "@/components/WalletButton";
-import { fetchInboxUnreadCount } from "@/lib/api/inbox";
+import { fetchInboxUnreadCount } from "@/lib/api/messages";
 import { fetchSellerOrders } from "@/lib/api/seller";
 import { PRIMARY_CHAIN_ID } from "@/lib/chains";
 import { hasMarketplace } from "@/lib/contracts";
@@ -19,7 +19,7 @@ const navItems = [
   { href: "/products", label: "Products" },
   { href: "/create", label: "Create Order" },
   { href: "/seller", label: "Seller Dashboard" },
-  { href: "/inbox", label: "Inbox" },
+  { href: "/messages", label: "Messages" },
   { href: "/settings", label: "Settings" },
   { href: "/seller/new", label: "Sell" },
   { href: "/admin", label: "Admin" },
@@ -39,8 +39,9 @@ export function AppFrame({ children }: { children: ReactNode }) {
   });
   const sellerBadgeCount = sellerBadgeQuery.data?.orders.length ?? 0;
 
-  // Total unread chat messages across all the user's threads. Only meaningful
-  // once SIWE'd in — the API 401s otherwise, so don't bother polling.
+  // Total unread direct messages across all the user's conversations. Only
+  // meaningful once SIWE'd in — the API 401s otherwise, so don't bother
+  // polling.
   const inboxBadgeQuery = useQuery({
     queryKey: ["inbox", "unread", siwe.sessionAddress ?? ""],
     queryFn: fetchInboxUnreadCount,
@@ -49,7 +50,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
   });
   const inboxUnreadCount = inboxBadgeQuery.data ?? 0;
 
-  const connectedOnlyHrefs = new Set(["/seller", "/settings", "/inbox"]);
+  const connectedOnlyHrefs = new Set(["/seller", "/settings", "/messages"]);
   const visibleNavItems = isConnected ? navItems : navItems.filter((item) => !connectedOnlyHrefs.has(item.href));
 
   return (
@@ -73,7 +74,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
               >
                 {item.label}
                 {item.href === "/seller" ? <NewOrderBadge count={sellerBadgeCount} /> : null}
-                {item.href === "/inbox" ? <NewOrderBadge count={inboxUnreadCount} /> : null}
+                {item.href === "/messages" ? <NewOrderBadge count={inboxUnreadCount} /> : null}
               </Link>
             ))}
             {siwe.sessionAddress ? (

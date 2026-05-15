@@ -13,7 +13,8 @@ export type NotificationKind =
   | "OrderRefunded"
   | "EvidenceSubmittedByBuyer"
   | "EvidenceSubmittedBySeller"
-  | "NewChatMessage";
+  | "NewChatMessage"
+  | "NewDirectMessage";
 
 export type NotificationTemplate = {
   subject: string;
@@ -100,7 +101,47 @@ export function renderNotification(kind: NotificationKind, order: ApiOrder): Not
         intro: `订单 #${order.onChainOrderId} 中对方刚给你发了一条消息，点击查看并回复。`,
         ...common
       });
+    case "NewDirectMessage":
+      // Direct messages don't ride on an order — this branch shouldn't be
+      // reached via renderNotification (which always has an order). The
+      // direct-message path uses renderDirectMessageNotification below.
+      // Falling through with a generic message just in case some legacy
+      // caller wires this kind into the order pipeline.
+      return buildTemplate({
+        title: "你有一条新私信",
+        subject: "「ChainUs」你有一条新私信",
+        intro: "你有一条新私信，点击查看并回复。",
+        ...common
+      });
   }
+}
+
+// Direct-message variant of renderNotification. Used by sendDirectMessageEmail
+// — no underlying order, so it can't reuse the order-shaped pipeline.
+export function renderDirectMessageNotification(args: {
+  conversationId: string;
+}): NotificationTemplate {
+  const url = `${appBaseUrl()}/messages?id=${encodeURIComponent(args.conversationId)}`;
+  const title = "你有一条新私信";
+  const subject = "「ChainUs」你有一条新私信";
+  const intro = "对方刚刚通过 ChainUs 给你发了一条私信，点击查看并回复。";
+
+  const html = `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-family:Arial,sans-serif;background:#f8fafc;padding:24px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:24px;">
+            <tr><td><h1 style="margin:0 0 12px;color:#0f172a;font-size:22px;">${escapeHtml(title)}</h1></td></tr>
+            <tr><td><p style="margin:0 0 20px;color:#334155;line-height:1.5;">${escapeHtml(intro)}</p></td></tr>
+            <tr><td style="padding-top:8px;"><a href="${escapeAttribute(url)}" style="display:inline-block;background:#0f172a;color:white;text-decoration:none;border-radius:6px;padding:10px 14px;">打开 Messages</a></td></tr>
+            <tr><td><p style="margin:20px 0 0;color:#64748b;font-size:12px;">出于隐私考虑，邮件中不显示消息正文或发送者地址。你可以在 Settings 中移除或更新通知邮箱。</p></td></tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  `;
+  const text = `${title}\n\n${intro}\n\n打开 Messages: ${url}\n\n出于隐私考虑，邮件中不显示消息正文或发送者地址。`;
+  return { subject, html, text };
 }
 
 function buildTemplate({

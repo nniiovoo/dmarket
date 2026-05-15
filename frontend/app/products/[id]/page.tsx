@@ -8,6 +8,7 @@ import { useAccount, useSignMessage } from "wagmi";
 
 import { BuyNowButton } from "@/components/BuyNowButton";
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
+import { ContactSellerButton } from "@/components/messages/ContactSellerButton";
 import { fetchProduct, updateProduct, deleteProduct, type Product } from "@/lib/api/products";
 import { sameAddress } from "@/lib/order";
 
@@ -188,6 +189,11 @@ export default function ProductDetailPage() {
             >
               Open advanced order form
             </Link>
+            <ContactSellerButton
+              sellerAddress={product.sellerAddress}
+              chainId={product.chainId}
+              productId={String(product.id)}
+            />
           </Card>
 
           {isSeller ? (

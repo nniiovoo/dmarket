@@ -272,10 +272,7 @@ model OrderChatMessage {
   @@index([senderAddress])
 }
 
-// Per-user, per-thread "last seen" cursor. Used by /api/inbox to compute
-// unread counts: a message is "unread" if createdAt > lastSeenAt AND it
-// wasn't sent by the viewer. Updated whenever a user GETs the chat
-// (i.e. opens the order detail page).
+// DEPRECATED — see OrderChatMessage above. Retained for audit only.
 model OrderChatLastSeen {
   walletAddress      String   // lowercased
   chainId            Int
@@ -284,5 +281,65 @@ model OrderChatLastSeen {
   lastSeenAt         DateTime @default(now())
 
   @@id([walletAddress, chainId, onChainOrderId, marketplaceVersion])
+  @@index([walletAddress, lastSeenAt])
+}
+
+// Direct conversation between two wallets on one chain. Replaces the
+// per-order chat surface above. One row per (chainId, participantA,
+// participantB) pair — participantA is always the lexicographically
+// smaller lowercased address so the unique constraint catches duplicate
+// inserts regardless of who initiated.
+//
+// initialProductId is a *hint*, not a scoping key: it records "this
+// conversation started from product page #X" so the UI can show context
+// in the header. Subsequent messages aren't tied to that product — if
+// the buyer asks about a different product in the same thread, the
+// thread doesn't fork.
+model Conversation {
+  id               String   @id    // 32-byte base64url
+  chainId          Int
+  participantA     String          // lowercased, lexicographically smaller of the pair
+  participantB     String          // lowercased, the other one
+  initialProductId String?         // optional product context recorded at creation time
+  createdAt        DateTime @default(now())
+  // Bumped on every send. Drives the conversation list sort order in the
+  // messenger sidebar without needing a window function.
+  lastMessageAt    DateTime @default(now())
+
+  messages         ConversationMessage[]
+
+  @@unique([chainId, participantA, participantB])
+  @@index([participantA, lastMessageAt])
+  @@index([participantB, lastMessageAt])
+}
+
+// One message within a Conversation. Attachment columns mirror
+// OrderChatMessage so the storage helper can be reused unchanged.
+model ConversationMessage {
+  id              String   @id  // 32-byte base64url
+  conversationId  String
+  senderAddress   String          // lowercased
+  body            String   @db.Text
+  attachmentKey         String?
+  attachmentBackend     String?   // "local" | "r2"
+  attachmentContentType String?
+  attachmentFileName    String?
+  attachmentSize        Int?
+  createdAt       DateTime @default(now())
+
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([senderAddress])
+}
+
+// Per-user read cursor for a conversation. /api/conversations uses this to
+// compute the unread count shown on the sidebar / nav badge.
+model ConversationLastSeen {
+  walletAddress  String         // lowercased
+  conversationId String
+  lastSeenAt     DateTime @default(now())
+
+  @@id([walletAddress, conversationId])
   @@index([walletAddress, lastSeenAt])
 }

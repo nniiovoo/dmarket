@@ -1,7 +1,11 @@
 import { prisma } from "@/lib/db";
 import { emailFrom, isEmailEnabled, resend } from "@/lib/email/client";
 import { getEmailForAddress, getOwnerEmail } from "@/lib/email/recipientLookup";
-import { renderNotification, type NotificationKind } from "@/lib/email/templates";
+import {
+  renderDirectMessageNotification,
+  renderNotification,
+  type NotificationKind
+} from "@/lib/email/templates";
 import { getOrder, type MarketplaceVersion } from "@/lib/orders";
 
 // Default dedup window: a given recipient gets at most one notification of
@@ -10,12 +14,13 @@ import { getOrder, type MarketplaceVersion } from "@/lib/orders";
 // annoy the user.
 const debounceMs = 24 * 60 * 60 * 1000;
 
-// Per-kind override for the 24h default. Chat is conversational — collapsing
-// every reply within a day into a single email would defeat the purpose of
-// the notification. One hour strikes a balance between "too chatty" and
-// "user actually finds out someone replied".
+// Per-kind override for the 24h default. Chat / DM are conversational —
+// collapsing every reply within a day into a single email would defeat the
+// purpose of the notification. One hour strikes a balance between
+// "too chatty" and "user actually finds out someone replied".
 const dedupWindowMsByKind: Partial<Record<NotificationKind, number>> = {
-  NewChatMessage: 60 * 60 * 1000
+  NewChatMessage: 60 * 60 * 1000,
+  NewDirectMessage: 60 * 60 * 1000
 };
 
 export async function sendNotification(
@@ -129,14 +134,21 @@ async function sendToEmail(
     return;
   }
 
-  const order = await getOrder(payload.chainId, payload.onChainOrderId, marketplaceVersion);
-
-  if (!order) {
-    await logEmail({ toAddress, toEmail, kind, ...payload, marketplaceVersion, status: "failed", error: "Order not found" });
-    return;
+  // Direct messages don't ride on an order — they belong to a Conversation.
+  // For this kind we pass the conversation id in the onChainOrderId slot
+  // (it still works as a unique dedup key) and render with a dedicated
+  // template that doesn't need ApiOrder fields.
+  let template;
+  if (kind === "NewDirectMessage") {
+    template = renderDirectMessageNotification({ conversationId: payload.onChainOrderId });
+  } else {
+    const order = await getOrder(payload.chainId, payload.onChainOrderId, marketplaceVersion);
+    if (!order) {
+      await logEmail({ toAddress, toEmail, kind, ...payload, marketplaceVersion, status: "failed", error: "Order not found" });
+      return;
+    }
+    template = renderNotification(kind, order);
   }
-
-  const template = renderNotification(kind, order);
 
   try {
     const result = await resend.emails.send({

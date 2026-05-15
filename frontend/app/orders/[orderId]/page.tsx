@@ -8,7 +8,6 @@ import { useAccount, useReadContract } from "wagmi";
 import type { Address } from "viem";
 
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
-import { OrderChatPanel } from "@/components/chat/OrderChatPanel";
 import { EvidenceSection } from "@/components/evidence/EvidenceSection";
 import { NetworkNotice } from "@/components/NetworkNotice";
 import { LockedActions } from "@/components/order/LockedActions";
@@ -250,7 +249,6 @@ export default function OrderDetailPage() {
             {orderQuery.isFetching || vaultQuery.isFetching ? <p className="mt-3 text-xs text-slate-500">Refreshing...</p> : null}
           </Card>
           <ShippingSection order={orderApi.data} status={order.status} isLoading={orderApi.isLoading} isSyncing={orderApi.isError} />
-          {orderApi.data ? <OrderChatPanel order={orderApi.data} /> : null}
           {orderApi.data ? <EvidenceSection order={orderApi.data} /> : null}
           {showShipDialog ? (
             <ShipWithTrackingDialog

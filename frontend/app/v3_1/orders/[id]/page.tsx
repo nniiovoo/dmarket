@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import { formatEther } from "viem";
 
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
-import { OrderChatPanel } from "@/components/chat/OrderChatPanel";
 import { V3_1EvidenceSection } from "@/components/evidence/V3_1EvidenceSection";
 import { getExplorerAddressUrl } from "@/lib/chains";
 import type { ApiOrder, OrderStatusName } from "@/lib/orders";
@@ -211,17 +210,7 @@ export default function V3_1OrderDetailPage() {
             </div>
           </Card>
 
-          {(() => {
-            // Compute the ApiOrder once and pass to both the chat panel and
-            // the evidence section so they share the same object identity.
-            const apiOrder = toApiOrder(order);
-            return (
-              <>
-                <OrderChatPanel order={apiOrder} />
-                <V3_1EvidenceSection order={apiOrder} />
-              </>
-            );
-          })()}
+          <V3_1EvidenceSection order={toApiOrder(order)} />
         </>
       ) : null}
     </div>
