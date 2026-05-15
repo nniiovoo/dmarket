@@ -104,6 +104,30 @@ npm run reputation:cron:once
 
 to issue the first round of attestations.
 
+### 2.6 Deploy the Kleros V2 dispute adapter
+
+The adapter bridges `resolveDispute` to the real Kleros V2 court. Once deployed, marketplace ownership is transferred to it — direct EOA `resolveDispute` calls revert from then on.
+
+```bash
+npx hardhat run scripts/deployKlerosAdapterV3_2.ts --network arbitrumSepolia
+```
+
+Paste the printed `V3_2_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS` into root `.env` (and the corresponding `NEXT_PUBLIC_` variant into `frontend/.env.local` once the front-end consumes it). Then transfer marketplace ownership:
+
+```bash
+npx hardhat run scripts/migrateV3_2MarketplaceToKlerosAdapter.ts --network arbitrumSepolia
+```
+
+The migration script is idempotent: re-running once `marketplace.owner() == adapter` exits cleanly. After this, `cast call $MARKETPLACE "owner()(address)"` should match the adapter address.
+
+For a real end-to-end smoke (creates an order, escalates, costs a few cents in arbitration fee):
+
+```bash
+npx hardhat run scripts/smokeKlerosV3_2.ts --network arbitrumSepolia
+```
+
+It prints the Kleros case URL — useful for confirming the dispute appears on `v2-testnet.kleros.builders`.
+
 ## 3. Day-to-day operations
 
 ### 3.1 Indexer
@@ -241,6 +265,7 @@ v3.2 is testnet-only today. Before any mainnet deploy:
 
 - [ ] Third-party audit of `EscrowMarketplaceERC20` + `ReputationRegistry` + the off-chain attestation pipeline (`issuer.ts` / `publisher.ts` / cron).
 - [ ] Multisig (e.g. Gnosis Safe, 2-of-3) accepts ownership of both contracts via `transferOwnership` → `acceptOwnership`. Apply a Timelock controller in front of the multisig for high-stakes operations.
+- [ ] **Transfer `KlerosV2DisputeAdapterV3_2` ownership to the same multisig + Timelock.** Until then, the EOA adapter owner can call `executeOnMarketplace(resolveDispute…)` and bypass the 30+7 day emergency timelock. Multisig + Timelock turn that backdoor into a publicly observable, delayable action.
 - [ ] Replace public RPC with a paid Alchemy / Infura tier on the indexer and relayer hosts. (The `publisher.ts` receipt-wait workaround can stay; cost is one extra round-trip per attestation.)
 - [ ] Replace the in-memory rate limiter in `frontend/lib/rateLimit.ts` with Redis (or Upstash). Affects `/api/reputation/[address]` and any other endpoint sharing the limiter.
 - [ ] Observability: Prometheus / Grafana metrics for indexer lag, cron success rate, attestation publish latency. Pager alert on `lagSeconds > 60` and on `failed > 0` in the most recent cron run.

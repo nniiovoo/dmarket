@@ -133,7 +133,103 @@ This proves the new key is live and controllable before it becomes authoritative
 
 The registry's EIP-712 domain references the registry address itself, not any specific marketplace. Anyone with the registry address can call `verifyAttestation` and trust the result. Future v3.3 / v4 marketplaces can read the same registry without re-issuing scores; the score formula off-chain just needs to know which order tables to aggregate over (see `gatherSellerOrders` in `score.ts`, which unions `OnChainOrder` / `OnChainOrderV3_1` / `OnChainOrderV3_2`).
 
-## 4. Interfaces and events
+## 4. Kleros V2 Dispute Adapter (Pull-Mode Integration)
+
+`KlerosV2DisputeAdapterV3_2` bridges v3.2's owner-only `resolveDispute` to the real Kleros V2 court. After deployment, marketplace ownership is transferred to the adapter — from that moment on, `resolveDispute` is reachable only through three controlled paths: a Kleros ruling, a timelocked emergency refund, or the adapter owner's pass-through escape hatch (§4.4).
+
+### 4.1 Why pull-mode
+
+`EscrowMarketplaceERC20` is frozen and has no outbound hook that fires on `openDispute`. The v3 adapter relies on the v3 marketplace calling `adapter.createDispute()` inline — that requires a marketplace code change and v3.2 doesn't have one. So v3.2's adapter is *pull-mode*: any party calls `adapter.escalateToKleros(orderId)` after the order has been moved to `Disputed`, paying the Kleros arbitration fee on the spot.
+
+### 4.2 End-to-end sequence
+
+```
+buyer/seller ── openDispute ──► marketplace (status=Disputed, disputedAt=now)
+                                            │
+                                            │  (anyone in {buyer, seller})
+                                            ▼
+                              adapter.escalateToKleros(orderId, msg.value≥cost)
+                                            │
+                                            │  forwards exact cost
+                                            ▼
+                                Kleros V2 KlerosCore.createDispute(2, extraData)
+                                            │
+                                            │  returns klerosDisputeId
+                                            ▼
+                                  adapter records (orderId ↔ disputeId)
+                                  + escalatedAt = now
+                                  + over-payment → pendingRefunds (pull)
+                                            │
+                                            │  ... Kleros jurors deliberate (days) ...
+                                            ▼
+                                  Kleros.rule(disputeId, ruling) → adapter.rule()
+                                            │
+                              ┌─────────────┴─────────────┐
+                  in 3-day cooldown                  past cooldown
+                              │                           │
+                              ▼                           ▼
+              pendingRulings[orderId] = ruling   marketplace.resolveDispute(...)
+                              │                           │
+                              │   (anyone pokes later)    │
+                              ▼                           │
+              applyKlerosRuling(orderId) ─────────────────┘
+```
+
+`escalateToKleros` is permissionless within the order's party set (only `buyer` or `seller` of that specific order can pay the fee — a defense against grief-spam from outside parties).
+
+### 4.3 Design choices that deviate from the original adapter spec
+
+Four places where the implementation differs from the literal task spec or from the v3 adapter, with the trade-off in each:
+
+1. **Deferred-then-applied rulings (`pendingRulings` + `applyKlerosRuling`).** v3.2's `resolveDispute` enforces a 3-day post-dispute cooldown. A Kleros ruling that arrives inside the cooldown would revert the callback if we called `resolveDispute` synchronously. Instead the adapter wraps `marketplace.resolveDispute` in `try/catch`; on revert the ruling stays in `pendingRulings` and anyone can re-apply once the cooldown elapses. **Trade-off**: complexity vs. losing rulings. The v3 adapter takes the same approach for the same reason.
+
+2. **`executeOnMarketplace` pass-through.** v3.2 marketplace has owner-only functions (`pause`, `unpause`, `setAcceptedToken`) that would be permanently unreachable after ownership transfer if the adapter exposed nothing more than `resolveDispute`. The adapter therefore exposes a generic `executeOnMarketplace(bytes calldata)` for the owner. **Trade-off**: this is a backdoor — the adapter owner can also use it to invoke `resolveDispute` directly, bypassing the Kleros + timelock paths. The mitigation is to lock adapter ownership behind a multisig + Timelock before mainnet (RUNBOOK §6).
+
+3. **`RULING_REFUSE` (0) defaults to refund buyer.** The Kleros "refuse to arbitrate" outcome means jurors abstained. v3 leaves these for the owner to handle manually. v3.2 has no fast owner override (the only owner path is the 30-day-Kleros + 7-day-timelock emergency flow), so leaving the dispute unresolved would block the order for at least 37 days. We normalise refuse → buyer-refund instead. **Trade-off**: consumer-friendly default vs. a small bias toward the buyer. Acceptable because Kleros tends to refuse only on clearly malformed disputes, which a buyer-default reasonably handles.
+
+4. **Pull-payment refund for over-paid arbitration fees.** `escalateToKleros` lets callers send `msg.value > arbitrationCost`; the excess is *not* push-refunded inline (pushing to a non-payable contract would brick the escalation). Excess sits in `pendingRefunds[msg.sender]` and the caller withdraws via `withdrawRefund()`. **Trade-off**: one extra UX step vs. losing escalation availability for contract callers. The v3 adapter has the same fix.
+
+### 4.4 Emergency refund flow
+
+If Kleros never rules (jurors offline, court paused, etc.), the adapter has a time-gated escape:
+
+```
+adapter.escalateToKleros ──► escalatedAt = T
+                              │
+                              │   wait KLEROS_TIMEOUT = 30 days
+                              ▼
+                  proposeEmergencyRefund(orderId, refundBuyer)
+                              │   onlyOwner
+                              ▼
+                   emergencyProposedAt = T + 30 days
+                              │
+                              │   wait EMERGENCY_TIMELOCK = 7 days
+                              ▼
+                  executeEmergencyRefund(orderId)
+                              │   onlyOwner
+                              ▼
+                  marketplace.resolveDispute(orderId, refundBuyer)
+```
+
+The owner can `cancelEmergencyRefund(orderId)` at any time before execution (used if Kleros ruling lands during the 7-day window). Both gates are required: `KLEROS_TIMEOUT` ensures the owner can't race a normal Kleros deliberation; `EMERGENCY_TIMELOCK` gives the public 7 days to observe a malicious proposal.
+
+### 4.5 Trust model + mainnet requirement
+
+The adapter owner — through `executeOnMarketplace` — has unconditional authority to invoke `resolveDispute` on the marketplace at any time. This is intentional: it's the universal escape hatch for orders that were never escalated, marketplace pauses, accepted-token allowlist updates, etc.
+
+This trust is the same as the marketplace owner had pre-transfer, just wrapped in one extra hop. Pre-mainnet, the adapter owner MUST be a `TimelockController` admin'd by a multisig (see RUNBOOK §6). EOA ownership is acceptable on testnet only.
+
+### 4.6 Deployed addresses
+
+**Arbitrum Sepolia**
+
+- Adapter: `0x5fD98A1916600c9957914347547D94FD0A337D0f`
+- Kleros V2 KlerosCore (upstream): `0xE8442307d36e9bf6aB27F1A009F95CE8E11C3479`
+- Marketplace ownership: transferred to adapter (`marketplace.owner() == adapter`)
+
+First real Kleros V2 dispute escalated through this adapter: **case #34** on `v2-testnet.kleros.builders`.
+
+## 5. Interfaces and events
 
 ### 4.1 `EscrowMarketplaceERC20`
 
@@ -168,19 +264,19 @@ Events: `OrderCreated`, `OrderPaid`, `OrderShipped`, `OrderCompleted`, `OrderCan
 
 Events: `AttestationRecorded`, `SignerRotationProposed`, `SignerRotated`.
 
-## 5. Compatibility with v3 / v3.1
+## 6. Compatibility with v3 / v3.1
 
 - **No shared state.** v3.2 does not read or write v3 / v3.1 storage. The v3.1 Functions oracle, evidence registry, Kleros adapter, and vault all stay untouched.
 - **Separate indexer tables.** `OnChainOrderV3_2` and `IndexerStateV3_2` live in their own Postgres tables. `(chainId, marketplaceAddress, onChainOrderId)` is the unique key — `v3.OrderId=1` and `v3.2.OrderId=1` are physically different rows.
 - **Distinct order URL.** Frontend route is `/orders/v3_2/[chainId]/[marketplaceAddress]/[onChainOrderId]`. The legacy `/orders/[orderId]?chainId=…&marketplace=v3.2` URL is 308-redirected by the server wrapper at `app/orders/[orderId]/page.tsx`.
 - **Reputation aggregates across lanes.** `gatherSellerOrders` in `score.ts` reads all four order tables (`OnChainOrder` / `OnChainOrderV3_1` / `OnChainOrderV3_2`, plus a placeholder for an eventual v2-only split) and combines them by lowercased seller address. A seller's score reflects their full ChainUs history regardless of which marketplace lane an order ran on.
 
-## 6. Known limitations / future work
+## 7. Known limitations / future work
 
 - **Fee-on-transfer / rebase tokens are not supported.** `payOrderERC20` assumes the exact `amount` arrives on `safeTransferFrom`. Tokens that take a fee mid-transfer would leave the marketplace short by the fee. The allowlist is the only gate today — operators must manually verify a token isn't fee-on-transfer before calling `setAcceptedToken`.
 - **USDT approve-race is handled in the frontend only.** `useBuyNowERC20` does `approve(0)` then `approve(amount)` when an existing allowance is non-zero but insufficient. Tokens that revert on direct `approve` from non-zero will still get this treatment. No on-chain code change is needed.
 - **No permit / EIP-2612 path.** Every ERC-20 buy is two-step (approve + pay). Adding permit would cut buyer interactions but requires a permit-aware variant of `payOrderERC20` and isn't on this phase's scope.
-- **`resolveDispute` is `onlyOwner`.** v3 has a Kleros adapter; v3.2 doesn't yet. Same adapter pattern carries over (no contract change needed in `EscrowMarketplaceERC20` — only an adapter contract that the owner key authorises). Tracked in `docs/ROADMAP.md` §2.3.
+- **`resolveDispute` is `onlyOwner` — Kleros adapter took ownership.** Phase H wires `KlerosV2DisputeAdapterV3_2` (see §4) and transfers `marketplace.owner` to the adapter. Direct EOA calls to `resolveDispute` now revert; resolution happens via Kleros ruling, the timelocked emergency path, or the adapter's `executeOnMarketplace` escape hatch.
 - **`publisher.ts` awaits the tx receipt** before returning, to serialise back-to-back attestations against the relayer wallet's nonce. This was added during Phase E.5 when public Arbitrum Sepolia RPCs were lagging `eth_getTransactionCount`. On a paid RPC (Alchemy / Infura) the wait is essentially free; revisit if it becomes a throughput bottleneck.
 - **EvidenceRegistry / shipping API not wired.** The v3.2 order detail page intentionally renders a minimal subset of components — no `<EvidenceSection />`, no `<TrackingLink />`, no `<ShipWithTrackingDialog />`. Tracked in `docs/ROADMAP.md` §2.3.
 - **Reputation `version` is `uint8`.** A single subject is capped at 255 attestations. Issuer hard-checks this — beyond that limit the schema needs a redesign.

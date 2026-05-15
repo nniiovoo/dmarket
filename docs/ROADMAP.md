@@ -277,10 +277,12 @@ quality issues on **already-shipped** code.
 
 #### v3.2 follow-ups (from Phase A–G work)
 
-- [ ] **Kleros 仲裁 adapter for v3.2.** The contract has the same
+- [x] **Kleros 仲裁 adapter for v3.2.** The contract has the same
       `openDispute` / `resolveDispute` surface as v3, so the adapter
-      pattern from `KlerosV2DisputeAdapter` carries over. Not deployed
-      yet. *Est: 2-3 days.*
+      pattern from `KlerosV2DisputeAdapter` carries over. (2026-05-15:
+      deployed at `0x5fD98A1916600c9957914347547D94FD0A337D0f` on
+      Arbitrum Sepolia; marketplace ownership transferred; first real
+      Kleros V2 dispute #34 escalated.)
 - [ ] **Seller self-publish attestation.** The "Publish update on-chain"
       button on `ReputationBadge` (full variant) is disabled with a
       Coming soon tooltip. Wiring it up means letting the seller's

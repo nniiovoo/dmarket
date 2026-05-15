@@ -37,6 +37,10 @@ const abiTargets = [
   {
     artifact: "artifacts/contracts/v3_2/ReputationRegistry.sol/ReputationRegistry.json",
     output: "frontend/abi/ReputationRegistry.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3_2/KlerosV2DisputeAdapterV3_2.sol/KlerosV2DisputeAdapterV3_2.json",
+    output: "frontend/abi/KlerosV2DisputeAdapterV3_2.json"
   }
 ];
 

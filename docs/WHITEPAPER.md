@@ -99,7 +99,7 @@ ChainUs 当前在三条公链上运行三套合约版本：
 | v2 | Sepolia + Polygon Amoy | 已冻结的稳定版，单条链原生币结算 |
 | v3 | Arbitrum Sepolia | 接入 Kleros V2 真实仲裁 + EvidenceRegistry |
 | v3.1 | Arbitrum Sepolia | 引入签名授权下单（单签 createAndPayWithAuth） |
-| v3.2 | Arbitrum Sepolia | ERC-20 结算 + 链上声誉（`EscrowMarketplaceERC20` + `ReputationRegistry`，已部署） |
+| v3.2 | Arbitrum Sepolia | ERC-20 结算 + 链上声誉 + Kleros V2 仲裁（已部署） |
 
 ### 3.1 订单生命周期
 
@@ -174,6 +174,7 @@ v3.1 引入 EIP-712 签名授权，允许买家通过一次签名完成「创建
 **Arbitrum Sepolia（v3.2）**
 - Marketplace (`EscrowMarketplaceERC20`): `0xFf488C9bE6ec21AC47368bed321F4aAa62bAbCA1`
 - ReputationRegistry: `0xa3A62B5Bf8a3537ACd931D7b1e13d59b6ceaca1e`
+- KlerosAdapter: `0x5fD98A1916600c9957914347547D94FD0A337D0f`
 - Mock USD（`mUSD`，仅用于 testnet dev）: `0x2331987BBf1d1543DA8F0d00D3a0C6f5B8b95b52`
 
 v3.2 是与 v3 / v3.1 并行的独立 lane（不继承 v3.1），marketplace 自托管 ERC-20，无独立 Vault。详细设计与接口见 [`contracts/v3_2/ARCHITECTURE.md`](../contracts/v3_2/ARCHITECTURE.md)，部署与运维流程见 [`docs/V3_2_DEPLOYMENT_RUNBOOK.md`](V3_2_DEPLOYMENT_RUNBOOK.md)。
@@ -262,6 +263,8 @@ Vault 按裁决释放资金
 ```
 
 **关键点**：从 `openDispute` 那一刻起，平台 owner **没有任何方式**单方面挪用这笔订单的资金，除非走 Kleros 裁决回调。
+
+> v3.2 marketplace 也已接入同一 Kleros V2 仲裁器（同 chain，同 KlerosCore）；流程与上图一致，但跨过的是 `KlerosV2DisputeAdapterV3_2`（marketplace ownership 已转交给它）。详见 [`contracts/v3_2/ARCHITECTURE.md`](../contracts/v3_2/ARCHITECTURE.md) §4。
 
 ### 5.3 卖家声誉
 
