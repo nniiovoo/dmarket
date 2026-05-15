@@ -1,118 +1,89 @@
 import { test } from "node:test";
 import assert from "node:assert";
 
-import { parseUserQueryWithClient, NLUSchemaError } from "./nlu";
-import { computeCostUsd } from "./llm";
+import { parseUserQueryWithProvider, NLUSchemaError } from "./nlu";
+import type { LLMCallOptions, LLMProvider, LLMToolResponse, LLMUsage } from "./llm";
 
-type MockMessage = {
-  content: Array<{
-    type: "tool_use" | "text";
-    name?: string;
-    input?: unknown;
-    text?: string;
-  }>;
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  };
-};
-
-function makeClient(message: MockMessage) {
+function makeProvider(input: unknown, usage: LLMUsage): LLMProvider {
   return {
-    messages: {
-      // The SDK exposes more than `create`, but our wrapper only uses
-      // create. Cast as Pick<...> so the type doesn't require the rest.
-      async create() {
-        return message;
-      }
-    }
-  } as unknown as Parameters<typeof parseUserQueryWithClient>[0];
+    name: "anthropic",
+    model: "claude-sonnet-4-6",
+    // Cast the response generic so the mock matches LLMProvider's
+    // generic callWithTool signature. Tests don't observe T directly.
+    callWithTool: (async (opts: LLMCallOptions) =>
+      ({
+        toolCall: { toolName: opts.toolName, input },
+        usage,
+        providerName: "anthropic",
+        model: "claude-sonnet-4-6"
+      } as LLMToolResponse<unknown>)) as LLMProvider["callWithTool"]
+  };
 }
 
 test("happy path: tool_use → parsed fields aligned with fixture", async () => {
-  const client = makeClient({
-    content: [
-      {
-        type: "tool_use",
-        name: "extract_query",
-        input: {
-          q: "iPhone 15",
-          priceMaxWei: "500000000",
-          sortBy: "relevance",
-          limit: 10,
-          offset: 0,
-          confidence: "medium",
-          explanation: "USDC at 6 decimals"
-        }
-      }
-    ],
-    usage: { input_tokens: 1200, output_tokens: 80, cache_read_input_tokens: 0 }
-  });
+  const provider = makeProvider(
+    {
+      q: "iPhone 15",
+      priceMaxWei: "500000000",
+      sortBy: "relevance",
+      limit: 10,
+      offset: 0,
+      confidence: "medium",
+      explanation: "USDC at 6 decimals"
+    },
+    { inputTokens: 1200, cachedInputTokens: 0, outputTokens: 80, costUsd: 0.005 }
+  );
 
-  const result = await parseUserQueryWithClient(client, "iPhone 15 under 500 USDC");
+  const result = await parseUserQueryWithProvider(provider, "iPhone 15 under 500 USDC");
   assert.strictEqual(result.parsed.q, "iPhone 15");
   assert.strictEqual(result.parsed.priceMaxWei, 500_000_000n);
   assert.strictEqual(result.parsed.sortBy, "relevance");
   assert.strictEqual(result.parsed.limit, 10);
   assert.strictEqual(result.confidence, "medium");
   assert.ok(result.explanation.length > 0);
+  // Usage carries provider tag through to the caller.
+  assert.strictEqual(result.usage.providerName, "anthropic");
+  assert.strictEqual(result.usage.model, "claude-sonnet-4-6");
 });
 
 test("tool_use input fails Zod schema → NLUSchemaError", async () => {
-  const client = makeClient({
-    content: [
-      {
-        type: "tool_use",
-        name: "extract_query",
-        input: {
-          // Missing `q` (required); sortBy uses an invalid value.
-          sortBy: "magic",
-          limit: 10,
-          offset: 0,
-          confidence: "high",
-          explanation: "x"
-        }
-      }
-    ],
-    usage: { input_tokens: 1000, output_tokens: 40 }
-  });
+  const provider = makeProvider(
+    {
+      // Missing `q` (required); sortBy uses an invalid value.
+      sortBy: "magic",
+      limit: 10,
+      offset: 0,
+      confidence: "high",
+      explanation: "x"
+    },
+    { inputTokens: 1000, cachedInputTokens: 0, outputTokens: 40, costUsd: 0.003 }
+  );
 
-  await assert.rejects(() => parseUserQueryWithClient(client, "anything"), NLUSchemaError);
+  await assert.rejects(() => parseUserQueryWithProvider(provider, "anything"), NLUSchemaError);
 });
 
-test("cost calc applies cached-input discount when cache_read tokens reported", async () => {
-  const client = makeClient({
-    content: [
-      {
-        type: "tool_use",
-        name: "extract_query",
-        input: {
-          q: "headphones",
-          sortBy: "price_asc",
-          limit: 10,
-          offset: 0,
-          confidence: "high",
-          explanation: "ok"
-        }
-      }
-    ],
-    usage: {
-      input_tokens: 1500,
-      cache_read_input_tokens: 1400, // most of the system prompt was cached
-      output_tokens: 60
-    }
-  });
+test("usage propagates verbatim from the provider into the NLU result", async () => {
+  const usage: LLMUsage = {
+    inputTokens: 1500,
+    cachedInputTokens: 1400,
+    outputTokens: 60,
+    costUsd: 0.0012
+  };
+  const provider = makeProvider(
+    {
+      q: "headphones",
+      sortBy: "price_asc",
+      limit: 10,
+      offset: 0,
+      confidence: "high",
+      explanation: "ok"
+    },
+    usage
+  );
 
-  const result = await parseUserQueryWithClient(client, "cheapest headphones");
-  // uncached 100 * $3/MTok + cached 1400 * $0.30/MTok + output 60 * $15/MTok
-  const expected = computeCostUsd(1500, 1400, 60);
+  const result = await parseUserQueryWithProvider(provider, "cheapest headphones");
   assert.strictEqual(result.usage.inputTokens, 1500);
   assert.strictEqual(result.usage.cachedInputTokens, 1400);
   assert.strictEqual(result.usage.outputTokens, 60);
-  assert.ok(Math.abs(result.usage.costUsd - expected) < 1e-9);
-  // sanity: cached cost is meaningfully cheaper than full-rate
-  const fullRate = computeCostUsd(1500, 0, 60);
-  assert.ok(result.usage.costUsd < fullRate * 0.5);
+  assert.strictEqual(result.usage.costUsd, 0.0012);
 });

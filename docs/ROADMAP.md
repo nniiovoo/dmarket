@@ -31,36 +31,32 @@ estimates against the eventual production scope, not against an MVP.
 - [ ] **Open API for merchants / developers.** REST + API-key auth + rate
       limit + per-tenant analytics. *Est: 3-4 weeks.*
 
-### 1.2 AI ordering layer — the differentiator (~40%, but only steps 4–7)
+### 1.2 AI ordering layer — the differentiator (MVP shipped at `v3.3.0`)
 
-- [ ] **Step 1 — 需求理解 (NLU).** No LLM endpoint, no slot extraction.
-      *Est: 1 week (Claude API + tool use).*
-- [ ] **Step 2 — AI 选品推荐.** No recommendation pipeline. *Est: 1 week
-      on top of step 1.*
-- [ ] **Step 3 — AI 风险评估.** No risk model. *Est: 1 week to ship a
-      simple "compute from existing order history" version.*
-- [x] Step 4 — 创建订单草稿（人工版本已可用，AI 自动版本待 step 1-3）
-- [x] Step 5 — 用户确认
-- [x] Step 6 — Checkout（MetaMask / WalletConnect 签名）
-- [x] Step 7 — 链上执行（escrow + 资金锁定）
+- [x] **Step 1 — 需求理解 (NLU).** Multi-provider abstraction
+      (DeepSeek / OpenAI / Anthropic) with tool-use; see `lib/ai/llm/`.
+- [x] **Step 2 — AI 选品推荐.** `lib/ai/recommend.ts` — NLU + Postgres
+      search + reputation gate + risk filter → top 3.
+- [x] **Step 3 — AI 风险评估.** Reputation registry + risk engine
+      defaults (blacklist, seller anomaly score). Wired into the
+      recommend pipeline.
+- [x] Step 4 — 创建订单草稿（AI 自动版本 via `/api/ai/draft-order`，
+      返回未签名的 EIP-712 PaymentAuth + sign URL）
+- [x] Step 5 — 用户确认（ChatGPT GPT 或 `/shop` 对话框内确认 + 点 Buy）
+- [x] Step 6 — Checkout（`/sign/<draftId>` 钱包弹窗签名 + 自付 gas）
+- [x] Step 7 — 链上执行（v3.2 `createAndPayWithAuth`）
 
-### 1.3 AI capability layer (~0%)
+### 1.3 AI capability layer (MVP shipped at `v3.3.0`)
 
-All of these are net-new services we have not started:
-
-- [ ] **NLU service** — parse free-text product intent into structured
-      `{category, attributes, price_cap_wei, urgency}`. Recommend Claude
-      API with tool use and prompt caching. *Est: 1 week.*
-- [ ] **Search engine** — replace `prisma.product.findMany` with an
-      indexed search (e.g. Postgres `tsvector` + trigram, or Meilisearch
-      if we want fuzzy matching across descriptions). *Est: 3-4 days.*
-- [ ] **Recommendation ranker** — feature vector per product
-      `{price, seller_rep, delivery_speed, popularity_30d}` → score.
-      Start with hand-tuned linear model; learn later. *Est: 1 week.*
-- [ ] **Risk model** — per-seller risk score from on-chain history
-      (dispute rate, refund rate, avg fulfilment time, dormancy). Pure
-      SQL aggregation off `OnChainOrder` + `OnChainOrderV3_1` for MVP.
-      *Est: 4-5 days.*
+- [x] **NLU service** — `lib/ai/nlu.ts` + `lib/ai/llm/`. DeepSeek default;
+      OpenAI / Anthropic optional. Anthropic prompt-caching wired.
+- [x] **Search engine** — Postgres `tsvector` + `pg_trgm` in
+      `lib/search/products.ts`.
+- [x] **Recommendation ranker** — tier (reputation ≥ 700) + relevance
+      sort with sentinel-seller passthrough; see `lib/ai/recommend.ts`.
+      Linear-model upgrade waits until we have usage data to fit it on.
+- [x] **Risk model** — `lib/risk/engine` + `lib/risk/defaultRules`.
+      Blacklist + per-seller anomaly score driven off OnChainOrderV3_2.
 - [ ] **Logistics / delivery-time predictor** — uses 17track snapshots
       we already store + carrier statistics. Output: "expected
       delivery in X-Y days, P50/P90". *Est: 1 week.*

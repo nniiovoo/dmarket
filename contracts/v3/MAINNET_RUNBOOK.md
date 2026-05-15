@@ -82,7 +82,7 @@ KLEROS_ADAPTER_ARBITRUM_ADDRESS=
 # Chainlink Functions
 FUNCTIONS_SUBSCRIPTION_ID=...
 TRACK17_API_KEY=...
-TRACKING_LOOKUP_URL=https://api.chainus.app/tracking-lookup
+TRACKING_LOOKUP_URL=https://api.chainus.org/tracking-lookup
 ```
 
 `SELLER_PRIVATE_KEY` is **not** used in mainnet deployment — drop it for safety so a stray E2E script can't accidentally run on mainnet.

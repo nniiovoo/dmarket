@@ -463,6 +463,57 @@ model ConversationLastSeen {
   @@index([walletAddress, lastSeenAt])
 }
 
+// Phase I.3 — unsigned EIP-712 PaymentAuth payloads prepared by the AI
+// ordering layer. The buyer is the address bound to the caller's
+// session/OAuth token. The row is short-lived (`expiresAt`, ~30 min) and is
+// marked `signedAt` once the buyer's wallet posts the signature via
+// /sign/[id]. The `nonce` mirrors v3.2's per-buyer authNonces counter at
+// draft time; the sign page re-reads on-chain authNonces before signing
+// and refuses if it has moved (which would mean an earlier draft was
+// already settled).
+model DraftOrder {
+  id                  String    @id // 32-byte random, URL-safe
+  buyer               String // lowercased 0x address
+  seller              String // checksummed (mirrors product.sellerAddress)
+  paymentToken        String // 0x0 for native; ERC-20 address otherwise
+  productId           String // matches Product.id stringified (no DB FK; products may move chains)
+  amount              String // wei (native) or token base units
+  nonce               String // PaymentAuth.nonce, stringified uint256
+  deadline            DateTime // PaymentAuth.deadline, stored as UTC
+  chainId             Int
+  marketplaceAddress  String
+  productNameSnapshot String    @default("")
+  createdAt           DateTime  @default(now())
+  expiresAt           DateTime
+  signedAt            DateTime?
+  txHash              String?
+  cancelledAt         DateTime?
+
+  @@index([buyer, createdAt(sort: Desc)])
+  @@index([expiresAt])
+}
+
+// Phase I.3 — OAuth 2.0 authorization codes issued at the end of the SIWE
+// landing page (/oauth/connect) and exchanged for a JWT bearer at
+// /oauth/token. Bound to (clientId, address, redirectUri) and consumed
+// at most once. We don't model long-lived refresh tokens for MVP — when
+// the JWT expires, the user re-runs the GPT and SIWE again.
+model OAuthAuthorizationCode {
+  code                String    @id
+  clientId            String
+  address             String // lowercased 0x
+  redirectUri         String
+  scope               String    @default("")
+  codeChallenge       String?
+  codeChallengeMethod String?
+  createdAt           DateTime  @default(now())
+  expiresAt           DateTime
+  consumedAt          DateTime?
+
+  @@index([expiresAt])
+  @@index([address])
+}
+
 // Blacklist of buyer/seller/on-chain addresses blocked from the platform.
 // Inverse of EVIDENCE_ADMIN_ADDRESSES — admins add entries; the risk engine
 // reads them. address is always stored lowercase 0x-hex.

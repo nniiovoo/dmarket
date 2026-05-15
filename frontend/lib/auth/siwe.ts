@@ -10,12 +10,12 @@
 //
 // Message format (single line per field):
 //
-//   chainus.app wants you to sign in with your Ethereum account:
+//   chainus.org wants you to sign in with your Ethereum account:
 //   0xABCD...
 //
 //   Authenticate to view dispute evidence on ChainUs.
 //
-//   URI: https://chainus.app
+//   URI: https://chainus.org
 //   Version: 1
 //   Chain ID: 421614
 //   Nonce: <one-time random base64url>

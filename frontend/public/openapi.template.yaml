@@ -1,0 +1,687 @@
+openapi: 3.1.0
+info:
+  title: ChainUs AI Shopping API
+  version: "0.3.0"
+  summary: Public AI surface for the ChainUs decentralized marketplace.
+  description: |
+    Endpoints that an LLM agent (ChatGPT Custom GPT, Claude MCP) calls on
+    behalf of a wallet-bound user to:
+
+      1. Search products via natural-language intent (`/api/ai/search`).
+      2. Prepare an unsigned EIP-712 PaymentAuth payload that the buyer's
+         wallet later signs and submits on-chain
+         (`/api/ai/draft-order`).
+      3. Record the resulting on-chain tx for audit / UX
+         (`/api/ai/draft-order/{draftId}/mark-signed`).
+
+    The agent never receives private keys, never submits transactions, and
+    never accepts a "send to address" instruction. Every order ends with a
+    sign URL the buyer opens in their own browser, where their wallet pops
+    up the EIP-712 PaymentAuth. See `docs/AI_LAYER_ROADMAP.md` for the
+    full architecture.
+
+    All endpoints require OAuth 2.0 bearer auth with scope `ai-agent`
+    (see `securitySchemes.chainusOAuth`).
+  contact:
+    name: ChainUs
+    url: https://chainus.org
+
+servers:
+  - url: ${PUBLIC_BASE_URL}
+    description: |
+      Public origin. The `${PUBLIC_BASE_URL}` placeholder is replaced at
+      serve-time by `app/openapi.yaml/route.ts` with the value of
+      `NEXT_PUBLIC_APP_ORIGIN` (falling back to the request origin), so
+      the file consumers see is already a concrete absolute HTTPS URL.
+      Must be HTTPS for ChatGPT — http:// and localhost are rejected by
+      the Actions importer. For local development behind ngrok, set
+      `NEXT_PUBLIC_APP_ORIGIN=https://<your-tunnel>.ngrok.app`.
+    variables:
+      # Declared so OpenAPI 3.1 validators (redocly) accept the
+      # `${PUBLIC_BASE_URL}` placeholder above. The actual value is
+      # injected by the serving route before the spec ever reaches a
+      # consumer; this default is only used when the raw source file is
+      # read directly. (swagger-cli 4 rejects the `description` key on
+      # server variables, so we keep the explanation as a comment.)
+      PUBLIC_BASE_URL:
+        default: https://chainus.org
+
+security:
+  - chainusOAuth:
+      - ai-agent
+
+tags:
+  - name: search
+    description: Natural-language product search backed by Claude tool-use.
+  - name: draft-order
+    description: Unsigned EIP-712 PaymentAuth drafts + lifecycle.
+
+paths:
+  /api/ai/search:
+    post:
+      tags: [search]
+      operationId: searchProducts
+      summary: Search ChainUs products by natural-language intent.
+      description: |
+        Takes a free-text shopping query and returns up to 3 ranked
+        candidates. The pipeline:
+
+          1. Parses the query with Claude tool-use into structured fields
+             (q, priceMaxWei, chainId, sortBy, ...).
+          2. Executes a Postgres full-text + trigram search.
+          3. Filters by seller reputation (default floor 600/1000) and
+             risk rules; brand-new sellers pass through with
+             `reputation.sentinel = true`.
+          4. Sorts by reputation tier then relevance, slices to top 3.
+
+        Rate-limited per authenticated wallet address. Daily LLM-cost
+        budget is also enforced per address — a 429 with
+        `costUsdSoFar` / `capUsd` indicates the budget cap was hit.
+      security:
+        - chainusOAuth: [ai-agent]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+            examples:
+              under500usdc:
+                summary: Price-capped iPhone search.
+                value:
+                  query: "find me an iPhone 15 under 500 USDC"
+              cheapestHeadphones:
+                summary: Sort-intent extracted from the query.
+                value:
+                  query: "cheapest bluetooth headphones on Arbitrum"
+      responses:
+        '200':
+          description: Up to 3 candidates plus pipeline funnel stats.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: Validation error (missing / oversized `query`, bad JSON).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          description: NLU stage could not parse the query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: LLM is not configured (ANTHROPIC_API_KEY missing).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/ai/draft-order:
+    post:
+      tags: [draft-order]
+      operationId: createDraftOrder
+      summary: Build an unsigned EIP-712 PaymentAuth + sign URL for a product.
+      description: |
+        Reads the chosen product, computes the order amount in the
+        accepted ERC-20 token (mUSD on Arbitrum Sepolia at MVP), reads
+        the buyer's current `authNonces` value from the v3.2 marketplace,
+        and stores a `DraftOrder` row keyed on a random 24-byte id.
+
+        Returns the EIP-712 envelope (domain + types + message) the
+        wallet will feed to `signTypedData_v4`, plus a `signUrl` the
+        buyer must open in their own browser. The agent MUST present
+        `signUrl` to the user verbatim — it never signs anything itself.
+
+        Passing `expectedPriceWei` is recommended: if the product's
+        on-chain price has drifted since the search step, the call
+        responds 409 with the current and previously seen prices, and
+        the agent should re-run search before retrying.
+      security:
+        - chainusOAuth: [ai-agent]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DraftOrderRequest'
+            examples:
+              basic:
+                summary: Draft a mUSD order for product 7.
+                value:
+                  productId: 7
+                  paymentTokenSymbol: "mUSD"
+                  expectedPriceWei: "1000000000000000"
+      responses:
+        '200':
+          description: Draft created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftOrderResponse'
+        '400':
+          description: |
+            Validation, `buyer_is_seller`, `payment_token_not_supported`,
+            or `unsupported_chain`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Buyer or seller is on the platform blacklist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Product not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Price drift — product's `priceWei` changed since `expectedPriceWei` was observed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceDriftResponse'
+        '410':
+          description: Product is no longer active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          description: v3.2 marketplace not configured, or on-chain nonce read failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/ai/draft-order/{draftId}/mark-signed:
+    post:
+      tags: [draft-order]
+      operationId: markDraftSigned
+      summary: Record the on-chain tx hash for a signed draft.
+      description: |
+        Idempotent record-keeping. Called by the `/sign/{draftId}` page
+        after the buyer's wallet confirms `createAndPayWithAuth`. The
+        on-chain transaction is authoritative; this row just lets a
+        refreshed sign URL render "already signed" and gives support a
+        tx-hash lookup. A second call with the same `draftId` is a
+        no-op and returns `alreadySigned: true`.
+
+        **Note for ChatGPT agents:** in normal user flow this is called
+        by the in-browser sign page, NOT by the agent — there's rarely
+        a reason for the GPT to call this directly. It is exposed here
+        for parity with non-browser integrations.
+      security:
+        - chainusOAuth: [ai-agent]
+      parameters:
+        - in: path
+          name: draftId
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{1,64}$'
+          description: 24-byte base64url id returned by `createDraftOrder`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkSignedRequest'
+      responses:
+        '200':
+          description: Marked signed (or already signed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarkSignedResponse'
+        '400':
+          description: Validation error (bad txHash format).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '404':
+          description: Draft not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    chainusOAuth:
+      type: oauth2
+      description: |
+        Standard OAuth 2.0 authorization-code flow against the ChainUs
+        OAuth server. Discovery doc:
+        `${PUBLIC_BASE_URL}/.well-known/oauth-authorization-server`.
+        The buyer signs SIWE on `/oauth/connect`, which binds the issued
+        bearer token to a specific Ethereum address. PKCE (S256) is
+        supported but optional.
+      flows:
+        authorizationCode:
+          authorizationUrl: ${PUBLIC_BASE_URL}/oauth/authorize
+          tokenUrl: ${PUBLIC_BASE_URL}/api/oauth/token
+          scopes:
+            ai-agent: Search ChainUs products and create order drafts.
+
+  responses:
+    Unauthorized:
+      description: Missing / invalid bearer token, or no SIWE cookie.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    RateLimited:
+      description: Per-account rate limit exceeded, or daily LLM budget cap hit.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RateLimitResponse'
+
+  schemas:
+    SearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Free-text shopping intent.
+          example: "iPhone 15 pro under 500 USDC"
+
+    SearchResponse:
+      type: object
+      required: [recommendation, caller, requestId]
+      properties:
+        recommendation:
+          $ref: '#/components/schemas/Recommendation'
+        caller:
+          $ref: '#/components/schemas/Caller'
+        requestId:
+          type: string
+          format: uuid
+
+    Recommendation:
+      type: object
+      required: [parsed, confidence, explanation, candidates, usage, pipeline]
+      properties:
+        parsed:
+          $ref: '#/components/schemas/ParsedQuery'
+        confidence:
+          type: string
+          enum: [high, medium, low]
+        explanation:
+          type: string
+          description: Plain-English summary from the NLU stage, shown to the user.
+        candidates:
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/Candidate'
+        usage:
+          $ref: '#/components/schemas/TokenUsage'
+        pipeline:
+          $ref: '#/components/schemas/PipelineStats'
+
+    ParsedQuery:
+      type: object
+      description: Structured form of the user's query as extracted by Claude.
+      properties:
+        q:
+          type: string
+        priceMaxWei:
+          type: [string, "null"]
+          pattern: '^[0-9]+$'
+        priceMinWei:
+          type: [string, "null"]
+          pattern: '^[0-9]+$'
+        chainId:
+          type: [integer, "null"]
+        sortBy:
+          type: string
+          enum: [relevance, price_asc, price_desc, recent]
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 20
+        offset:
+          type: integer
+          minimum: 0
+
+    Candidate:
+      type: object
+      required: [product, reputation, reasoning]
+      properties:
+        product:
+          $ref: '#/components/schemas/ProductRow'
+        reputation:
+          $ref: '#/components/schemas/CandidateReputation'
+        reasoning:
+          type: string
+          description: One-line rationale combining reputation + relevance.
+
+    ProductRow:
+      type: object
+      required: [id, name, description, priceWei, sellerAddress, chainId, status, createdAt, relevanceScore]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        priceWei:
+          type: string
+          pattern: '^[0-9]+$'
+          description: Price in wei (18 decimals, ETH-denominated). Convert to display token at the agent layer.
+        sellerAddress:
+          type: string
+          pattern: '^0x[0-9a-fA-F]{40}$'
+        chainId:
+          type: integer
+          example: 421614
+        imageUrl:
+          type: string
+        status:
+          type: string
+          enum: [active]
+        createdAt:
+          type: string
+          format: date-time
+        relevanceScore:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    CandidateReputation:
+      type: object
+      required: [score, sampleSize, sentinel]
+      properties:
+        score:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 1000
+          description: Null when `sentinel = true` (insufficient on-chain history).
+        sampleSize:
+          type: integer
+          minimum: 0
+        sentinel:
+          type: boolean
+          description: True when the seller has fewer than 5 completed orders; presented with a "new seller" badge.
+
+    TokenUsage:
+      type: object
+      required: [inputTokens, cachedInputTokens, outputTokens, costUsd]
+      properties:
+        inputTokens:
+          type: integer
+        cachedInputTokens:
+          type: integer
+        outputTokens:
+          type: integer
+        costUsd:
+          type: number
+          format: float
+
+    PipelineStats:
+      type: object
+      required: [searchHits, afterReputationFilter, afterRiskFilter]
+      properties:
+        searchHits:
+          type: integer
+        afterReputationFilter:
+          type: integer
+        afterRiskFilter:
+          type: integer
+
+    Caller:
+      type: object
+      required: [address, via]
+      properties:
+        address:
+          type: string
+          pattern: '^0x[0-9a-fA-F]{40}$'
+        via:
+          type: string
+          enum: [siwe, oauth]
+
+    DraftOrderRequest:
+      type: object
+      required: [productId]
+      properties:
+        productId:
+          type: integer
+          minimum: 1
+          description: "`id` of the product returned by `searchProducts`."
+        paymentTokenSymbol:
+          type: string
+          minLength: 1
+          maxLength: 16
+          description: Optional. Defaults to the chain's first accepted token (mUSD on Arbitrum Sepolia).
+          example: mUSD
+        expectedPriceWei:
+          type: string
+          pattern: '^[0-9]+$'
+          description: |
+            Recommended. The `priceWei` the agent observed at search
+            time. If it no longer matches, the endpoint returns 409 so
+            the agent can re-confirm with the user.
+
+    DraftOrderResponse:
+      type: object
+      required: [draftId, signUrl, expiresAt, payload, product, token, caller, requestId]
+      properties:
+        draftId:
+          type: string
+          description: 24-byte base64url id.
+        signUrl:
+          type: string
+          format: uri
+          description: Open in browser; wallet pops up to sign + submit. Show this to the user verbatim.
+        expiresAt:
+          type: string
+          format: date-time
+        payload:
+          $ref: '#/components/schemas/PaymentAuthEnvelope'
+        product:
+          $ref: '#/components/schemas/DraftProductSnapshot'
+        token:
+          $ref: '#/components/schemas/DraftTokenSnapshot'
+        caller:
+          $ref: '#/components/schemas/Caller'
+        requestId:
+          type: string
+          format: uuid
+
+    PaymentAuthEnvelope:
+      type: object
+      description: EIP-712 envelope. Wallets feed this directly into `signTypedData_v4`.
+      required: [domain, types, primaryType, message]
+      properties:
+        domain:
+          type: object
+          required: [name, version, chainId, verifyingContract]
+          properties:
+            name:
+              type: string
+              example: ChainUsEscrowERC20
+            version:
+              type: string
+              example: "3.2"
+            chainId:
+              type: integer
+            verifyingContract:
+              type: string
+              pattern: '^0x[0-9a-fA-F]{40}$'
+        types:
+          type: object
+          description: EIP-712 type definitions; canonical for the v3.2 PaymentAuth struct.
+        primaryType:
+          type: string
+          enum: [PaymentAuth]
+        message:
+          type: object
+          required: [buyer, seller, paymentToken, productId, amount, nonce, deadline]
+          properties:
+            buyer:
+              type: string
+              pattern: '^0x[0-9a-fA-F]{40}$'
+            seller:
+              type: string
+              pattern: '^0x[0-9a-fA-F]{40}$'
+            paymentToken:
+              type: string
+              pattern: '^0x[0-9a-fA-F]{40}$'
+            productId:
+              type: string
+              pattern: '^[0-9]+$'
+            amount:
+              type: string
+              pattern: '^[0-9]+$'
+              description: Base units of the payment token (e.g. 6-decimal mUSD).
+            nonce:
+              type: string
+              pattern: '^[0-9]+$'
+            deadline:
+              type: string
+              pattern: '^[0-9]+$'
+              description: Unix seconds.
+
+    DraftProductSnapshot:
+      type: object
+      required: [id, name, sellerAddress, priceWei, chainId]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        sellerAddress:
+          type: string
+          pattern: '^0x[0-9a-fA-F]{40}$'
+        priceWei:
+          type: string
+          pattern: '^[0-9]+$'
+        chainId:
+          type: integer
+
+    DraftTokenSnapshot:
+      type: object
+      required: [symbol, address, decimals, amount]
+      properties:
+        symbol:
+          type: string
+          example: mUSD
+        address:
+          type: string
+          pattern: '^0x[0-9a-fA-F]{40}$'
+        decimals:
+          type: integer
+          example: 6
+        amount:
+          type: string
+          pattern: '^[0-9]+$'
+
+    PriceDriftResponse:
+      type: object
+      required: [error, currentPriceWei, sawPriceWei, requestId]
+      properties:
+        error:
+          type: string
+          enum: [price_drift]
+        currentPriceWei:
+          type: string
+          pattern: '^[0-9]+$'
+        sawPriceWei:
+          type: string
+          pattern: '^[0-9]+$'
+        requestId:
+          type: string
+          format: uuid
+
+    MarkSignedRequest:
+      type: object
+      required: [txHash]
+      properties:
+        txHash:
+          type: string
+          pattern: '^0x[0-9a-fA-F]{64}$'
+        orderId:
+          type: [string, "null"]
+          pattern: '^[0-9]+$'
+          description: v3.2 marketplace orderId parsed from the OrderCreated log, when known.
+
+    MarkSignedResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        alreadySigned:
+          type: boolean
+        txHash:
+          type: string
+          pattern: '^0x[0-9a-fA-F]{64}$'
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+        message:
+          type: string
+        requestId:
+          type: string
+          format: uuid
+
+    ValidationErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          type: object
+          description: Zod-flattened error tree.
+        requestId:
+          type: string
+          format: uuid
+
+    RateLimitResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: rate_limit_exceeded
+        resetAt:
+          type: string
+          format: date-time
+          description: When the per-minute limiter resets.
+        costUsdSoFar:
+          type: number
+          description: Set when the daily budget cap was the reason for the 429.
+        capUsd:
+          type: number
+        requestId:
+          type: string
+          format: uuid

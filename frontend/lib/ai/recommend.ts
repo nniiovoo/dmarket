@@ -7,7 +7,7 @@ import { computeSellerScore } from "@/lib/reputation/score";
 import { searchProducts, type SearchResultRow, type SearchProductsInput } from "@/lib/search/products";
 
 import { parseUserQuery } from "./nlu";
-import type { Confidence } from "./nlu";
+import type { Confidence, NLUUsage } from "./nlu";
 import { addUsage, emptyUsage, type TokenUsage } from "./llm";
 
 // Phase I.2 product recommender. Composes three stages:
@@ -60,7 +60,11 @@ export interface RecommendResult {
   confidence: Confidence;
   explanation: string;
   candidates: CandidateWithMeta[];
-  usage: TokenUsage;
+  /// `usage` carries the LLM provider / model tag in addition to the
+  /// token counts. Older I.2 consumers that destructured `inputTokens`
+  /// / `costUsd` keep working — the extra `providerName` / `model`
+  /// fields are additive.
+  usage: NLUUsage;
   pipeline: RecommendPipelineStats;
 }
 
@@ -96,7 +100,7 @@ export async function recommendProducts(
   // NLU is the only API-spending step today; reputation + risk are pure
   // DB reads. If recommend ever issues a second LLM call (e.g. a
   // re-rank pass), switch this to a let + addUsage(...) accumulator.
-  const usage: TokenUsage = nlu.usage;
+  const usage: NLUUsage = nlu.usage;
 
   // Reputation pass. Compute per unique seller so a seller with many
   // listings only pays one score-compute. Sentinel sellers pass through

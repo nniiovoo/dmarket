@@ -3,6 +3,9 @@
 import { formatUnits } from "viem";
 
 import { getAcceptedTokens, type AcceptedToken } from "@/lib/contractsV3_2";
+import { convertEthWeiToToken, MOCK_ETH_TO_MUSD } from "@/lib/payment/tokenAmount";
+
+export { convertEthWeiToToken };
 
 export type PaymentMode =
   | { kind: "native" }
@@ -14,11 +17,6 @@ type Props = {
   onChange: (value: PaymentMode) => void;
   productPriceInWei: bigint;
 };
-
-// TODO: replace with real oracle in Phase D. 1 ETH = 3000 mUSD is fine for
-// testnet demo purposes; the on-chain order amount is whatever the buyer
-// commits to, so a stale rate just changes how the UI labels the price.
-const MOCK_ETH_TO_MUSD = 3000n;
 
 export function PaymentTokenPicker({ chainId, value, onChange, productPriceInWei }: Props) {
   const erc20Tokens = getAcceptedTokens(chainId);
@@ -65,13 +63,3 @@ export function PaymentTokenPicker({ chainId, value, onChange, productPriceInWei
   );
 }
 
-// Convert an ETH-denominated price (in wei, 18 decimals) into the target
-// token's smallest unit, using the mock rate. Caller is responsible for
-// displaying / submitting this value as the order amount.
-export function convertEthWeiToToken(priceWei: bigint, token: AcceptedToken): bigint {
-  const tokenScaled = priceWei * MOCK_ETH_TO_MUSD;
-  if (token.decimals >= 18) {
-    return tokenScaled * 10n ** BigInt(token.decimals - 18);
-  }
-  return tokenScaled / 10n ** BigInt(18 - token.decimals);
-}

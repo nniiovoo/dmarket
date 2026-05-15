@@ -2,12 +2,18 @@ import { test } from "node:test";
 import assert from "node:assert";
 
 import { recommendProducts, DEFAULT_MIN_REPUTATION } from "./recommend";
-import type { NLUResult } from "./nlu";
-import type { TokenUsage } from "./llm";
+import type { NLUResult, NLUUsage } from "./nlu";
 import type { SearchResultRow, SearchProductsResult } from "@/lib/search/products";
 import type { SellerScore } from "@/lib/reputation/score";
 
-const USAGE: TokenUsage = { inputTokens: 1200, cachedInputTokens: 0, outputTokens: 50, costUsd: 0.004 };
+const USAGE: NLUUsage = {
+  inputTokens: 1200,
+  cachedInputTokens: 0,
+  outputTokens: 50,
+  costUsd: 0.004,
+  providerName: "anthropic",
+  model: "claude-sonnet-4-6"
+};
 
 function row(overrides: Partial<SearchResultRow> = {}): SearchResultRow {
   return {

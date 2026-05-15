@@ -287,33 +287,40 @@ Vault 按裁决释放资金
 
 ---
 
-## 6. 规划中：AI 订购层
+## 6. AI 订购层（MVP 已实现）
 
 我们的判断是：**Web3 电商真正的差异化不在合约设计，而在订单入口体验**。当 AI 能直接代用户下单时，传统电商的 SEO / 搜索框 / 推荐位 / 广告位会被绕过。
 
-### 6.1 目标链路
+**当前状态**：AI 订购层 MVP 已上线，覆盖两条入口（ChatGPT Custom GPT + 网站对话框）。完整阶段进度见 [`docs/AI_LAYER_ROADMAP.md`](./AI_LAYER_ROADMAP.md)，开发者与运维参考见 [`docs/WEB_CHATBOX_GUIDE.md`](./WEB_CHATBOX_GUIDE.md) 与 [`docs/CHATGPT_CUSTOM_GPT_SETUP.md`](./CHATGPT_CUSTOM_GPT_SETUP.md)。
+
+### 6.1 实际链路
 
 ```
-用户："我想买一个 500 USDC 以下的 iPhone 15，要能寄到墨西哥"
+用户："我想买一个 500 USDC 以下的 iPhone 15"
       ▼
-1. NLU 服务：解析为 {category, attributes, price_cap, region}
-2. 候选选品：tsvector / Meilisearch 检索 → 取 Top 20
-3. 风险评分：每个候选过 risk engine + reputation
-4. 推荐排序：(价格, 卖家信用, 预期送达, 历史成交) 线性打分
-5. 返回 3 个候选 + 一句话说明
-6. 用户确认 → 生成订单草稿
-7. Checkout → 钱包签名 → 链上 createAndPayWithAuth
+1. NLU 服务（lib/ai/llm 抽象，DeepSeek 默认 / OpenAI / Anthropic 可切换）
+   将自然语言解析为 SearchProductsInput
+2. 候选选品（Postgres tsvector + pg_trgm，lib/search/products）取 Top 30
+3. 声誉过滤：每个候选过 ReputationRegistry + sentinel 标记
+4. 风险评分：lib/risk/engine 默认规则集（blacklist / anomaly score）
+5. 取分数 + relevance 综合得分前 3
+6. 返回候选 + 一句话说明（流向 /shop 对话框 或 ChatGPT 客户端）
+7. 用户点 Buy → /api/ai/draft-order 生成未签名的 EIP-712 PaymentAuth
+8. 用户在 /sign/<draftId> 钱包弹窗签名 + 自付 gas
+9. 链上 v3.2 createAndPayWithAuth 落地
 ```
 
-### 6.2 实现路径
+### 6.2 实际入口
 
-- **入口 1：MCP / Claude Apps**——把上述链路包成 Claude 工具，用户在 Claude 桌面端对话即可下单。
-- **入口 2：网站内 AI Assistant**——同一组 API，挂在 Next.js 前端。
-- **入口 3：开放 API**——给独立开发者 / 商家做集成。
+- **入口 1：ChatGPT Custom GPT**（Phase I.4）——公网 OpenAPI 3.1 spec + OAuth 2.0 授权码流程；用户在 ChatGPT 客户端里用自然语言即可走完上述 8 步。配置见 [`docs/CHATGPT_CUSTOM_GPT_SETUP.md`](./CHATGPT_CUSTOM_GPT_SETUP.md)。
+- **入口 2：网站对话框 `/shop`**（Phase I.5）——同一组 API，对 chainus.org 自有用户开放，SIWE session 直接打通钱包绑定；技术文档见 [`docs/WEB_CHATBOX_GUIDE.md`](./WEB_CHATBOX_GUIDE.md)。
+- **入口 3：Claude MCP server**（Phase I.6，未实现 follow-up）——目标是把同一组 API 暴露为 Anthropic Apps 目录里的 MCP server，让 Claude 桌面端用户也能直接下单。
+
+三条入口共享 Phase I.3 的公共 API（`/api/ai/search`、`/api/ai/draft-order`、SIWE / OAuth 双轨认证）。
 
 ### 6.3 与合约层的关系
 
-AI 订购层**完全不需要修改合约**。最终落到 `createAndPayWithAuth` 的还是同一份 v3.1 接口。AI 是入口，不是结算层。
+AI 订购层**完全不需要修改合约**。最终落到 `createAndPayWithAuth` 的还是同一份 v3.2 接口。AI 是入口，不是结算层；agent 永远不持有私钥，每笔订单都以用户在 `/sign/<draftId>` 钱包弹窗结束。
 
 ---
 
