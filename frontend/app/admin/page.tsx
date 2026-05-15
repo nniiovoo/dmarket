@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useReadContract } from "wagmi";
 
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
@@ -45,6 +45,110 @@ export default function AdminPage() {
   function refetchAll() {
     void ownerQuery.refetch();
     void orderQuery.refetch();
+  }
+
+  // ── Blacklist state ──────────────────────────────────────────────────────────
+  // TODO: long-term, call /api/auth/siwe/me and check the address against an
+  // admin-list endpoint so non-owner admins (EVIDENCE_ADMIN_ADDRESSES) can also
+  // see this section without being the on-chain marketplace owner.
+  interface BlacklistEntry {
+    address: string;
+    reason: string;
+    addedBy: string;
+    createdAt: string;
+  }
+
+  const [blEntries, setBlEntries] = useState<BlacklistEntry[] | null>(null);
+  const [blLoading, setBlLoading] = useState(false);
+  const [blError, setBlError] = useState<string | null>(null);
+  const [blAddr, setBlAddr] = useState("");
+  const [blReason, setBlReason] = useState("");
+  const [blFormError, setBlFormError] = useState<string | null>(null);
+  const [blSubmitting, setBlSubmitting] = useState(false);
+  const blFetchedRef = useRef(false);
+
+  const fetchBlacklist = useCallback(async () => {
+    setBlLoading(true);
+    setBlError(null);
+    try {
+      const res = await fetch("/api/admin/blacklist", { credentials: "include" });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as BlacklistEntry[];
+      setBlEntries(data);
+    } catch (err) {
+      setBlError(err instanceof Error ? err.message : "Failed to load blacklist");
+    } finally {
+      setBlLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isOwner || blFetchedRef.current) return;
+    blFetchedRef.current = true;
+    void fetchBlacklist();
+  }, [isOwner, fetchBlacklist]);
+
+  async function handleBlacklistAdd(event: React.FormEvent) {
+    event.preventDefault();
+    setBlFormError(null);
+    const addr = blAddr.trim();
+    const reason = blReason.trim();
+    if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) {
+      setBlFormError("Invalid Ethereum address (must be 0x + 40 hex chars).");
+      return;
+    }
+    if (!reason) {
+      setBlFormError("Reason is required.");
+      return;
+    }
+    setBlSubmitting(true);
+    try {
+      const res = await fetch("/api/admin/blacklist", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: addr.toLowerCase(), reason }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      setBlAddr("");
+      setBlReason("");
+      await fetchBlacklist();
+    } catch (err) {
+      setBlFormError(err instanceof Error ? err.message : "Failed to add address");
+    } finally {
+      setBlSubmitting(false);
+    }
+  }
+
+  async function handleBlacklistRemove(entryAddress: string) {
+    if (!window.confirm("Remove this address from the blacklist?")) return;
+    try {
+      const res = await fetch(`/api/admin/blacklist/${encodeURIComponent(entryAddress)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      await fetchBlacklist();
+    } catch (err) {
+      setBlError(err instanceof Error ? err.message : "Failed to remove address");
+    }
+  }
+
+  function truncate(value: string, len: number) {
+    return value.length > len ? value.slice(0, len) + "…" : value;
+  }
+
+  function shortAddr(value: string) {
+    return value.length >= 10 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
   }
 
   return (
@@ -155,6 +259,82 @@ export default function AdminPage() {
               })}
             />
           </div>
+        </Card>
+      )}
+
+      {isOwner && (
+        <Card title="Blacklist">
+          {blError && (
+            <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{blError}</p>
+          )}
+
+          {blLoading ? (
+            <>
+              <SkeletonLine />
+              <SkeletonLine className="mt-2 w-2/3" />
+            </>
+          ) : blEntries && blEntries.length === 0 ? (
+            <EmptyState title="No blacklisted addresses" body="Add an address below to block it from the platform." />
+          ) : blEntries && blEntries.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                    <th className="pb-2 pr-4">Address</th>
+                    <th className="pb-2 pr-4">Reason</th>
+                    <th className="pb-2 pr-4">Added by</th>
+                    <th className="pb-2 pr-4">Date</th>
+                    <th className="pb-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {blEntries.map((entry) => (
+                    <tr key={entry.address} className="border-b border-slate-100 last:border-0">
+                      <td className="py-2 pr-4 font-mono">{shortAddr(entry.address)}</td>
+                      <td className="py-2 pr-4 text-slate-700">{truncate(entry.reason, 60)}</td>
+                      <td className="py-2 pr-4 font-mono text-slate-500">{shortAddr(entry.addedBy)}</td>
+                      <td className="py-2 pr-4 text-slate-500">{new Date(entry.createdAt).toLocaleString()}</td>
+                      <td className="py-2">
+                        <button
+                          onClick={() => void handleBlacklistRemove(entry.address)}
+                          className="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          <form onSubmit={(e) => void handleBlacklistAdd(e)} className="mt-4 space-y-2">
+            {blFormError && (
+              <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{blFormError}</p>
+            )}
+            <div className="flex gap-2">
+              <input
+                value={blAddr}
+                onChange={(e) => setBlAddr(e.target.value)}
+                placeholder="0x address"
+                className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-sm"
+              />
+              <input
+                value={blReason}
+                onChange={(e) => setBlReason(e.target.value)}
+                placeholder="Reason"
+                className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+              />
+              <button
+                type="submit"
+                disabled={blSubmitting}
+                className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+          </form>
         </Card>
       )}
     </div>
