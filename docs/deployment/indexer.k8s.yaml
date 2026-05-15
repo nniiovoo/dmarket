@@ -1,0 +1,149 @@
+# Kubernetes Deployment for the ChainUs on-chain indexer.
+#
+# Two deploy modes are documented here:
+#
+#   (1) Standalone Deployment (this file, default) — the indexer runs as its
+#       own pod with replicas=1. Recommended for production: lifecycle is
+#       independent of the Next.js web pod, and rolling restarts of the web
+#       app don't restart the indexer (or vice versa).
+#
+#   (2) Sidecar in the web pod — uncomment the indexer container under the
+#       webapp Deployment further down. Use this only if you must share a
+#       pod (e.g. shared local cache volume). It's strictly inferior to (1)
+#       in normal multi-pod deploys because scaling the web tier to N
+#       replicas would also start N indexers, racing each other on the
+#       cursor table.
+#
+# Image: build your own from the frontend/ workspace. Suggested Dockerfile:
+#
+#   FROM node:22-alpine
+#   WORKDIR /app
+#   COPY frontend/package*.json frontend/prisma ./
+#   RUN npm ci
+#   COPY frontend/. .
+#   RUN npx prisma generate
+#   CMD ["npx", "tsx", "scripts/indexer.ts"]
+#
+# Apply:
+#   kubectl -n chainus apply -f indexer.k8s.yaml
+#   kubectl -n chainus logs -f deploy/chainus-indexer
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chainus
+---
+# Cursor state lives in Postgres, not in the pod, so a single-replica
+# Deployment is fine and rolling restart is safe.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chainus-indexer
+  namespace: chainus
+  labels:
+    app: chainus-indexer
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate. Two indexers racing on the same cursor
+    # row would do duplicate work and cause noisy upsert conflicts.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: chainus-indexer
+  template:
+    metadata:
+      labels:
+        app: chainus-indexer
+    spec:
+      terminationGracePeriodSeconds: 20
+      restartPolicy: Always
+      containers:
+        - name: indexer
+          image: ghcr.io/your-org/chainus-indexer:latest
+          imagePullPolicy: IfNotPresent
+          command: ["npx", "tsx", "scripts/indexer.ts"]
+          envFrom:
+            - secretRef:
+                name: chainus-indexer-env
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          # No HTTP server, so no readiness/liveness HTTP probes. Use an
+          # exec probe that touches the DB cursor table indirectly via
+          # `tsx scripts/indexer.ts --once` — too expensive for liveness.
+          # Cheaper: a TCP probe against the Postgres host from inside the
+          # pod, but that only proves DB reachability, not indexer health.
+          # For now rely on Restart=Always + Prometheus indexer-lag alerts.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Secret template. Populate with sealed-secrets / external-secrets / etc.
+# Required keys mirror frontend/.env.example.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: chainus-indexer-env
+  namespace: chainus
+type: Opaque
+stringData:
+  DATABASE_URL: "postgres://user:pass@host:5432/chainus"
+  SEPOLIA_RPC_URL: ""
+  AMOY_RPC_URL: ""
+  ARBITRUM_SEPOLIA_RPC_URL: ""
+  RESEND_API_KEY: ""
+  EVIDENCE_ADMIN_ADDRESSES: ""
+  NEXT_PUBLIC_V2_SEPOLIA_MARKETPLACE_ADDRESS: ""
+  NEXT_PUBLIC_V2_SEPOLIA_VAULT_ADDRESS: ""
+  NEXT_PUBLIC_V2_AMOY_MARKETPLACE_ADDRESS: ""
+  NEXT_PUBLIC_V2_AMOY_VAULT_ADDRESS: ""
+  NEXT_PUBLIC_KLEROS_ADAPTER_ARBITRUMSEPOLIA_ADDRESS: ""
+  NEXT_PUBLIC_V3_1_ARBITRUMSEPOLIA_EVIDENCE_REGISTRY_ADDRESS: ""
+  INDEXER_POLL_INTERVAL_MS: "15000"
+  INDEXER_CHUNK_SIZE_BLOCKS: "5000"
+  INDEXER_REQUEST_DELAY_MS: "75"
+---
+# Optional sidecar variant — keep commented unless you specifically need
+# colocation with the web pod. See header comment for tradeoffs.
+#
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: chainus-web
+#   namespace: chainus
+# spec:
+#   replicas: 2
+#   selector:
+#     matchLabels:
+#       app: chainus-web
+#   template:
+#     metadata:
+#       labels:
+#         app: chainus-web
+#     spec:
+#       containers:
+#         - name: web
+#           image: ghcr.io/your-org/chainus-web:latest
+#           ports:
+#             - containerPort: 3000
+#         - name: indexer-sidecar
+#           image: ghcr.io/your-org/chainus-indexer:latest
+#           command: ["npx", "tsx", "scripts/indexer.ts"]
+#           envFrom:
+#             - secretRef:
+#                 name: chainus-indexer-env

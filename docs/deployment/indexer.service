@@ -1,0 +1,60 @@
+# systemd unit for the ChainUs on-chain indexer.
+#
+# Replaces `npm run indexer` started by hand on a dev box. The indexer
+# already handles SIGINT/SIGTERM and exits cleanly (see
+# frontend/scripts/indexer.ts), so systemd `stop` is graceful.
+#
+# Install:
+#   sudo cp docs/deployment/indexer.service /etc/systemd/system/chainus-indexer.service
+#   # Edit paths + User= + EnvironmentFile= below for your host.
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now chainus-indexer
+#   sudo journalctl -u chainus-indexer -f
+#
+# Assumes Node 20+ is on PATH for the chosen user and that
+# `npm ci` has already been run inside /opt/chainus/frontend.
+
+[Unit]
+Description=ChainUs on-chain indexer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chainus
+Group=chainus
+WorkingDirectory=/opt/chainus/frontend
+
+# DATABASE_URL, RESEND_API_KEY, *_RPC_URL, EVIDENCE_ADMIN_ADDRESSES, and the
+# NEXT_PUBLIC_* contract addresses must be set here. Keep this file mode 0600
+# and owned by the service user — it contains the DB connection string.
+EnvironmentFile=/etc/chainus/indexer.env
+
+ExecStart=/usr/bin/env npx --no-install tsx scripts/indexer.ts
+
+# Restart on crash but back off so a hot loop on a bad RPC doesn't burn CPU.
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# 15s grace for the SIGTERM → prisma.$disconnect path. Indexer normally
+# exits in <1s; pad for slow disconnect on heavily-used DBs.
+TimeoutStopSec=15
+KillSignal=SIGTERM
+
+# Lightweight sandboxing. Indexer needs network + the working dir; nothing else.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/chainus/frontend
+LockPersonality=true
+RestrictRealtime=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=chainus-indexer
+
+[Install]
+WantedBy=multi-user.target

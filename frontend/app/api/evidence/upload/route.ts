@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 import { withErrorBoundary } from "@/lib/api/withErrorBoundary";
+import { createRateLimiter } from "@/lib/rateLimit";
 import { getSession } from "@/lib/auth/siwe";
 import { isOrderParty } from "@/lib/auth/authorize";
 import { prisma } from "@/lib/db";
@@ -31,9 +32,7 @@ const ALLOWED_TYPES = new Set([
   "text/plain"
 ]);
 
-const rateLimitWindowMs = 60_000;
-const maxUploadsPerWindow = 6;
-const uploadHits = new Map<string, { count: number; resetAt: number }>();
+const limiter = createRateLimiter({ name: "evidence-upload", max: 6, windowMs: 60_000 });
 
 export const POST = withErrorBoundary(async (request: NextRequest) => {
   const session = await getSession();
@@ -44,7 +43,7 @@ export const POST = withErrorBoundary(async (request: NextRequest) => {
     );
   }
 
-  const rateLimit = checkRateLimit(session.address.toLowerCase());
+  const rateLimit = await limiter.check(session.address.toLowerCase());
   if (!rateLimit.ok) {
     return NextResponse.json(
       { error: "Too many uploads. Wait a minute and try again." },
@@ -217,15 +216,3 @@ export const POST = withErrorBoundary(async (request: NextRequest) => {
     totalBytes
   });
 });
-
-function checkRateLimit(key: string) {
-  const now = Date.now();
-  const current = uploadHits.get(key);
-  if (!current || current.resetAt <= now) {
-    uploadHits.set(key, { count: 1, resetAt: now + rateLimitWindowMs });
-    return { ok: true };
-  }
-  if (current.count >= maxUploadsPerWindow) return { ok: false };
-  current.count += 1;
-  return { ok: true };
-}
