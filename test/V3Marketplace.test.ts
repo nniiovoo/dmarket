@@ -400,7 +400,7 @@ describe("V3 Marketplace (delivery oracle)", function () {
       const { marketplace, orderId } = fixture;
       const order = await marketplace.getOrder(orderId);
 
-      await recordDelivery(fixture, order.shippedAt);
+      await recordDelivery(fixture, order.shippedAt + 1n);
 
       await expect(marketplace.requestDelivery(orderId)).to.be.revertedWith("Delivery already recorded");
     });
@@ -414,7 +414,7 @@ describe("V3 Marketplace (delivery oracle)", function () {
         )
       );
       const orderBefore = await marketplace.getOrder(orderId);
-      const deliveredAt = orderBefore.shippedAt;
+      const deliveredAt = orderBefore.shippedAt + 1n;
 
       await marketplace.connect(other).requestDelivery(orderId);
 
@@ -527,6 +527,37 @@ describe("V3 Marketplace (delivery oracle)", function () {
       expect(deliveryLogs).to.deep.equal([]);
       expect((await marketplace.orders(0)).deliveredAt).to.equal(0n);
       expect((await marketplace.orders(orderId)).deliveredAt).to.equal(0n);
+    });
+
+    it("fulfillRequest 拒绝等于 shippedAt 的时间戳 (M2 fix)", async function () {
+      const { ethers, buyer, seller, router, marketplace, amount, productId } = await deploy();
+      await marketplace.connect(buyer).createAndPay(seller.address, productId, { value: amount });
+      const orderId = 1n;
+      await marketplace.connect(seller).markShipped(orderId);
+
+      const requestId = ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "address", "uint256"],
+          [await router.getAddress(), await marketplace.getAddress(), 1n]
+        )
+      );
+      await marketplace.connect(buyer).requestDelivery(orderId);
+
+      const order = await marketplace.getOrder(orderId);
+      const equalTs = order.shippedAt; // exactly equal — now rejected
+
+      await expect(
+        router.connect(seller).fulfill(
+          await marketplace.getAddress(),
+          requestId,
+          ethers.AbiCoder.defaultAbiCoder().encode(["bool", "uint64"], [true, equalTs]),
+          "0x"
+        )
+      )
+        .to.emit(marketplace, "DeliveryQueryFailed")
+        .withArgs(orderId, requestId, "Invalid delivered timestamp");
+
+      expect((await marketplace.getOrder(orderId)).deliveredAt).to.equal(0n);
     });
 
     it("fulfillRequest 拒绝早于 shippedAt 的时间戳", async function () {
@@ -669,8 +700,8 @@ describe("V3 Marketplace (delivery oracle)", function () {
     it("does not auto-complete before deliveredAt + 10 days", async function () {
       const fixture = await shippedOrder();
       const { ethers, other, marketplace, orderId } = fixture;
-      const block = await ethers.provider.getBlock("latest");
-      const deliveredAt = BigInt(block?.timestamp ?? 0);
+      const orderForTs = await marketplace.getOrder(orderId);
+      const deliveredAt = orderForTs.shippedAt + 1n;
 
       await recordDelivery(fixture, deliveredAt);
 
@@ -682,8 +713,8 @@ describe("V3 Marketplace (delivery oracle)", function () {
     it("lets anyone auto-complete after deliveredAt + 10 days and releases funds to seller", async function () {
       const fixture = await shippedOrder();
       const { ethers, other, seller, marketplace, vault, amount, orderId } = fixture;
-      const block = await ethers.provider.getBlock("latest");
-      const deliveredAt = BigInt(block?.timestamp ?? 0);
+      const orderForTs = await marketplace.getOrder(orderId);
+      const deliveredAt = orderForTs.shippedAt + 1n;
 
       await recordDelivery(fixture, deliveredAt);
       await ethers.provider.send("evm_increaseTime", [AUTO_CONFIRM_DELAY + 1]);
@@ -708,8 +739,8 @@ describe("V3 Marketplace (delivery oracle)", function () {
     it("cannot auto-complete twice (status must remain Shipped)", async function () {
       const fixture = await shippedOrder();
       const { ethers, other, marketplace, orderId } = fixture;
-      const block = await ethers.provider.getBlock("latest");
-      const deliveredAt = BigInt(block?.timestamp ?? 0);
+      const orderForTs = await marketplace.getOrder(orderId);
+      const deliveredAt = orderForTs.shippedAt + 1n;
 
       await recordDelivery(fixture, deliveredAt);
       await ethers.provider.send("evm_increaseTime", [AUTO_CONFIRM_DELAY + 1]);
@@ -725,8 +756,8 @@ describe("V3 Marketplace (delivery oracle)", function () {
     it("does not auto-complete after a dispute is opened", async function () {
       const fixture = await shippedOrder();
       const { ethers, buyer, other, marketplace, orderId } = fixture;
-      const block = await ethers.provider.getBlock("latest");
-      const deliveredAt = BigInt(block?.timestamp ?? 0);
+      const orderForTs = await marketplace.getOrder(orderId);
+      const deliveredAt = orderForTs.shippedAt + 1n;
 
       await recordDelivery(fixture, deliveredAt);
       await marketplace.connect(buyer).openDispute(orderId);
@@ -741,8 +772,8 @@ describe("V3 Marketplace (delivery oracle)", function () {
     it("still lets the buyer manually confirm after delivery is recorded", async function () {
       const fixture = await shippedOrder();
       const { ethers, buyer, seller, marketplace, vault, amount, orderId } = fixture;
-      const block = await ethers.provider.getBlock("latest");
-      const deliveredAt = BigInt(block?.timestamp ?? 0);
+      const orderForTs = await marketplace.getOrder(orderId);
+      const deliveredAt = orderForTs.shippedAt + 1n;
 
       await recordDelivery(fixture, deliveredAt);
 
@@ -1419,6 +1450,32 @@ describe("V3 Marketplace (delivery oracle)", function () {
       await expect(
         marketplace.connect(other).setEvidenceRegistry(ethers.ZeroAddress)
       ).to.be.revertedWithCustomError(marketplace, "OwnableUnauthorizedAccount");
+    });
+
+    it("L5: DisputeResolved is emitted after state change (status already Refunded/Completed when event fires)", async function () {
+      const { ethers, owner, buyer, seller, marketplace, amount, productId } = await deploy();
+      await marketplace.connect(buyer).createAndPay(seller.address, productId, { value: amount });
+      await marketplace.connect(seller).markShipped(1n);
+      await marketplace.connect(buyer).openDispute(1n);
+      await ethers.provider.send("evm_increaseTime", [3 * 24 * 3600 + 1]);
+      await ethers.provider.send("evm_mine", []);
+
+      const tx = await marketplace.connect(owner).resolveDispute(1n, true);
+      const receipt = await tx.wait();
+
+      // Parse log order: DisputeResolved must come AFTER the state is already set.
+      // We verify by checking that the order status at the block is Refunded.
+      const order = await marketplace.getOrder(1n);
+      expect(order.status).to.equal(OrderStatus.Refunded);
+
+      // Both events must be present in the receipt.
+      const parsedLogs = receipt!.logs
+        .map((log: any) => { try { return marketplace.interface.parseLog(log); } catch { return null; } })
+        .filter(Boolean)
+        .map((l: any) => l!.name);
+
+      expect(parsedLogs).to.include("DisputeResolved");
+      expect(parsedLogs).to.include("OrderRefunded");
     });
 
     it("resolveDispute / ownerEmergencyRefund 行为不受 evidenceRegistry 设置影响", async function () {

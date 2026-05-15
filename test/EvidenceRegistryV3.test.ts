@@ -229,7 +229,7 @@ describe("EvidenceRegistryV3", function () {
 
       await marketplace.connect(buyer).requestDelivery(orderId);
       const orderBefore = await marketplace.getOrder(orderId);
-      const deliveredAt = orderBefore.shippedAt;
+      const deliveredAt = orderBefore.shippedAt + 1n; // must be strictly after shippedAt (M2 fix)
 
       await router.fulfill(
         await marketplace.getAddress(),
@@ -296,7 +296,7 @@ describe("EvidenceRegistryV3", function () {
     });
 
     it("fulfillRequest stores OracleResult and emits OracleQueryFulfilled", async function () {
-      const { ethers, buyer, router, registry, orderId } = await deployWithDisputedOrder();
+      const { ethers, buyer, router, registry, marketplace, orderId } = await deployWithDisputedOrder();
 
       const requestId = ethers.keccak256(
         ethers.AbiCoder.defaultAbiCoder().encode(
@@ -306,7 +306,8 @@ describe("EvidenceRegistryV3", function () {
       );
       await registry.connect(buyer).submitEvidenceWithOracleQuery(orderId, "ipfs://q");
 
-      const deliveredTs = 1_800_000_000n;
+      const orderData = await marketplace.getOrder(orderId);
+      const deliveredTs = orderData.shippedAt + 1n;
       await expect(
         router.fulfill(
           await registry.getAddress(),
@@ -383,7 +384,7 @@ describe("EvidenceRegistryV3", function () {
   });
 
   describe("owner config setters", function () {
-    it("all 5 setters emit M1-style events", async function () {
+    it("setters emit correct events", async function () {
       const { ethers, owner, registry } = await deploy();
       const donId = ethers.encodeBytes32String("fun-sepolia");
       const newSource = "return Functions.encodeString('v2');";
@@ -403,9 +404,10 @@ describe("EvidenceRegistryV3", function () {
         .to.emit(registry, "CallbackGasLimitUpdated")
         .withArgs(300_000, 250_000);
 
-      await expect(registry.connect(owner).setRequestSource(newSource))
-        .to.emit(registry, "RequestSourceUpdated")
-        .withArgs(sourceHash, newSource.length);
+      // proposeRequestSource replaces setRequestSource (M1 fix — 7-day delay)
+      await expect(registry.connect(owner).proposeRequestSource(newSource))
+        .to.emit(registry, "RequestSourceProposed")
+        .withArgs(sourceHash, newSource.length, (v: bigint) => v > 0n);
 
       await expect(registry.connect(owner).setEncryptedSecretsReference(secretsRef))
         .to.emit(registry, "EncryptedSecretsReferenceUpdated")
@@ -427,7 +429,7 @@ describe("EvidenceRegistryV3", function () {
         registry,
         "OwnableUnauthorizedAccount"
       );
-      await expect(registry.connect(other).setRequestSource("x")).to.be.revertedWithCustomError(
+      await expect(registry.connect(other).proposeRequestSource("x")).to.be.revertedWithCustomError(
         registry,
         "OwnableUnauthorizedAccount"
       );
@@ -452,6 +454,190 @@ describe("EvidenceRegistryV3", function () {
       await registry.connect(other).acceptOwnership();
       expect(await registry.owner()).to.equal(other.address);
       expect(await registry.pendingOwner()).to.equal(ethers.ZeroAddress);
+    });
+  });
+
+  describe("M1: requestSource propose/commit/cancel (7-day delay)", function () {
+    const SOURCE_DELAY = 7 * 24 * 60 * 60;
+
+    it("proposeRequestSource writes pendingRequestSource and emits RequestSourceProposed", async function () {
+      const { ethers, owner, registry } = await deploy();
+      const newSource = "return Functions.encodeString('v2');";
+      const hash = ethers.keccak256(ethers.toUtf8Bytes(newSource));
+
+      const tx = await registry.connect(owner).proposeRequestSource(newSource);
+      const receipt = await tx.wait();
+      const block = await ethers.provider.getBlock(receipt!.blockNumber);
+      const expectedReadyAt = BigInt(block!.timestamp) + 7n * 24n * 3600n;
+
+      await expect(tx)
+        .to.emit(registry, "RequestSourceProposed")
+        .withArgs(hash, newSource.length, expectedReadyAt);
+
+      const pending = await registry.pendingRequestSource();
+      expect(pending.sourceHash).to.equal(hash);
+      expect(pending.readyAt).to.equal(expectedReadyAt);
+    });
+
+    it("cannot propose when a proposal is already pending", async function () {
+      const { owner, registry } = await deploy();
+      await registry.connect(owner).proposeRequestSource("a");
+      await expect(registry.connect(owner).proposeRequestSource("b")).to.be.revertedWith(
+        "Existing proposal must be cancelled first"
+      );
+    });
+
+    it("commitRequestSource reverts before delay elapses", async function () {
+      const { owner, registry } = await deploy();
+      const src = "return Functions.encodeString('v2');";
+      await registry.connect(owner).proposeRequestSource(src);
+      await expect(registry.connect(owner).commitRequestSource(src)).to.be.revertedWith(
+        "Proposal delay has not elapsed"
+      );
+    });
+
+    it("commitRequestSource reverts when source doesn't match proposal", async function () {
+      const { ethers, owner, registry } = await deploy();
+      await registry.connect(owner).proposeRequestSource("original");
+      await ethers.provider.send("evm_increaseTime", [SOURCE_DELAY + 1]);
+      await ethers.provider.send("evm_mine", []);
+      await expect(registry.connect(owner).commitRequestSource("different")).to.be.revertedWith(
+        "Source does not match pending proposal"
+      );
+    });
+
+    it("commitRequestSource after delay updates source and clears pending", async function () {
+      const { ethers, owner, registry } = await deploy();
+      const newSource = "return Functions.encodeString('v2');";
+      const hash = ethers.keccak256(ethers.toUtf8Bytes(newSource));
+
+      await registry.connect(owner).proposeRequestSource(newSource);
+      await ethers.provider.send("evm_increaseTime", [SOURCE_DELAY + 1]);
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(registry.connect(owner).commitRequestSource(newSource))
+        .to.emit(registry, "RequestSourceUpdated")
+        .withArgs(hash, newSource.length);
+
+      expect(await registry.requestSource()).to.equal(newSource);
+      const pending = await registry.pendingRequestSource();
+      expect(pending.sourceHash).to.equal(ethers.ZeroHash);
+    });
+
+    it("cancelPendingRequestSource clears proposal and emits event", async function () {
+      const { ethers, owner, registry } = await deploy();
+      const src = "return Functions.encodeString('v2');";
+      const hash = ethers.keccak256(ethers.toUtf8Bytes(src));
+
+      await registry.connect(owner).proposeRequestSource(src);
+      await expect(registry.connect(owner).cancelPendingRequestSource())
+        .to.emit(registry, "RequestSourceProposalCancelled")
+        .withArgs(hash);
+
+      // Can propose again after cancel
+      await registry.connect(owner).proposeRequestSource("new");
+    });
+
+    it("cancelPendingRequestSource reverts when no proposal pending", async function () {
+      const { owner, registry } = await deploy();
+      await expect(registry.connect(owner).cancelPendingRequestSource()).to.be.revertedWith(
+        "No pending proposal"
+      );
+    });
+
+    it("non-owner cannot propose/commit/cancel", async function () {
+      const { owner, other, registry } = await deploy();
+      await registry.connect(owner).proposeRequestSource("x");
+
+      await expect(registry.connect(other).proposeRequestSource("y")).to.be.revertedWithCustomError(
+        registry, "OwnableUnauthorizedAccount"
+      );
+      await expect(registry.connect(other).commitRequestSource("x")).to.be.revertedWithCustomError(
+        registry, "OwnableUnauthorizedAccount"
+      );
+      await expect(registry.connect(other).cancelPendingRequestSource()).to.be.revertedWithCustomError(
+        registry, "OwnableUnauthorizedAccount"
+      );
+    });
+  });
+
+  describe("L4: oracle timestamp validation in fulfillRequest", function () {
+    it("rejects delivered=true when deliveredTimestamp equals shippedAt", async function () {
+      const { ethers, buyer, router, registry, marketplace, orderId } = await deployWithDisputedOrder();
+
+      const requestId = ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "address", "uint256"],
+          [await router.getAddress(), await registry.getAddress(), 1n]
+        )
+      );
+      await registry.connect(buyer).submitEvidenceWithOracleQuery(orderId, "ipfs://q");
+
+      const orderData = await marketplace.getOrder(orderId);
+      const badTs = orderData.shippedAt; // exactly equal — now rejected
+
+      await router.fulfill(
+        await registry.getAddress(),
+        requestId,
+        ethers.AbiCoder.defaultAbiCoder().encode(["bool", "uint64"], [true, badTs]),
+        "0x"
+      );
+
+      const result = await registry.oracleResults(orderId, 0n);
+      expect(result.fulfilled).to.equal(true);
+      expect(result.delivered).to.equal(false); // rejected, stored as false
+      expect(result.deliveredTimestamp).to.equal(0n);
+    });
+
+    it("rejects delivered=true when deliveredTimestamp is in the future", async function () {
+      const { ethers, buyer, router, registry, orderId } = await deployWithDisputedOrder();
+
+      const requestId = ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "address", "uint256"],
+          [await router.getAddress(), await registry.getAddress(), 1n]
+        )
+      );
+      await registry.connect(buyer).submitEvidenceWithOracleQuery(orderId, "ipfs://q");
+
+      const block = await ethers.provider.getBlock("latest");
+      const futureTs = BigInt(block!.timestamp) + 365n * 24n * 3600n;
+
+      await router.fulfill(
+        await registry.getAddress(),
+        requestId,
+        ethers.AbiCoder.defaultAbiCoder().encode(["bool", "uint64"], [true, futureTs]),
+        "0x"
+      );
+
+      const result = await registry.oracleResults(orderId, 0n);
+      expect(result.delivered).to.equal(false);
+    });
+
+    it("accepts valid timestamp strictly between shippedAt and block.timestamp", async function () {
+      const { ethers, buyer, router, registry, marketplace, orderId } = await deployWithDisputedOrder();
+
+      const requestId = ethers.keccak256(
+        ethers.AbiCoder.defaultAbiCoder().encode(
+          ["address", "address", "uint256"],
+          [await router.getAddress(), await registry.getAddress(), 1n]
+        )
+      );
+      await registry.connect(buyer).submitEvidenceWithOracleQuery(orderId, "ipfs://q");
+
+      const orderData = await marketplace.getOrder(orderId);
+      const validTs = orderData.shippedAt + 1n;
+
+      await router.fulfill(
+        await registry.getAddress(),
+        requestId,
+        ethers.AbiCoder.defaultAbiCoder().encode(["bool", "uint64"], [true, validTs]),
+        "0x"
+      );
+
+      const result = await registry.oracleResults(orderId, 0n);
+      expect(result.delivered).to.equal(true);
+      expect(result.deliveredTimestamp).to.equal(validTs);
     });
   });
 

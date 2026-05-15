@@ -20,6 +20,7 @@ contract MockArbitratorV2 is IArbitratorV2 {
     mapping(uint256 => DisputeData) public disputes;
 
     function setFee(uint256 _fee) external { fee = _fee; }
+    function setNextDisputeID(uint256 _id) external { nextDisputeID = _id; }
 
     function arbitrationCost(bytes calldata) external view returns (uint256) {
         return fee;

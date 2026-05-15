@@ -261,17 +261,18 @@ contract EscrowMarketplaceV3 is Ownable2Step, Pausable, ReentrancyGuard, Functio
 
         uint256 amount = order.amount;
 
-        emit DisputeResolved(orderId, refundBuyer);
-
+        // L5: emit event after state changes, not before.
         if (refundBuyer) {
             address buyer = order.buyer;
 
             order.status = OrderStatus.Refunded;
 
+            emit DisputeResolved(orderId, refundBuyer);
             emit OrderRefunded(orderId, buyer, amount);
 
             vault.releaseToBuyer(orderId);
         } else {
+            emit DisputeResolved(orderId, refundBuyer);
             _completeOrder(orderId, order);
         }
     }
@@ -455,9 +456,9 @@ contract EscrowMarketplaceV3 is Ownable2Step, Pausable, ReentrancyGuard, Functio
             return;
         }
 
-        // M2: sanity-check the DON-supplied timestamp. Must be no earlier than
-        // shippedAt and no later than the current block.
-        if (deliveredTimestamp < order.shippedAt || deliveredTimestamp > uint64(block.timestamp)) {
+        // M2: sanity-check the DON-supplied timestamp. Must be strictly after
+        // shippedAt (not equal) and no later than the current block.
+        if (deliveredTimestamp <= order.shippedAt || deliveredTimestamp > uint64(block.timestamp)) {
             emit DeliveryQueryFailed(orderId, requestId, "Invalid delivered timestamp");
             return;
         }

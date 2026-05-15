@@ -40,6 +40,14 @@ contract EvidenceRegistryV3 is Ownable2Step, Pausable, FunctionsClient {
     bytes public encryptedSecretsReference;
 
     uint64 public constant ORACLE_QUERY_COOLDOWN = 1 hours;
+    // M1: mirror Marketplace's 7-day delay so requestSource can't be swapped instantly.
+    uint64 public constant REQUEST_SOURCE_DELAY = 7 days;
+
+    struct PendingSource {
+        bytes32 sourceHash;
+        uint64 readyAt;
+    }
+    PendingSource public pendingRequestSource;
 
     struct EvidenceRecord {
         address party;
@@ -87,6 +95,8 @@ contract EvidenceRegistryV3 is Ownable2Step, Pausable, FunctionsClient {
     event DonIdUpdated(bytes32 oldDonId, bytes32 newDonId);
     event CallbackGasLimitUpdated(uint32 oldCallbackGasLimit, uint32 newCallbackGasLimit);
     event RequestSourceUpdated(bytes32 indexed sourceHash, uint256 length);
+    event RequestSourceProposed(bytes32 indexed sourceHash, uint256 length, uint64 readyAt);
+    event RequestSourceProposalCancelled(bytes32 indexed sourceHash);
     event EncryptedSecretsReferenceUpdated(bytes32 indexed referenceHash, uint256 length);
 
     error EmptyEvidence();
@@ -207,6 +217,15 @@ contract EvidenceRegistryV3 is Ownable2Step, Pausable, FunctionsClient {
 
         (bool delivered, uint64 deliveredTimestamp) = abi.decode(response, (bool, uint64));
 
+        // L4: validate oracle-supplied timestamp against marketplace order data.
+        if (delivered) {
+            IEscrowMarketplaceV3.Order memory order = marketplace.getOrder(ref.orderId);
+            if (deliveredTimestamp <= order.shippedAt || deliveredTimestamp > uint64(block.timestamp)) {
+                delivered = false;
+                deliveredTimestamp = 0;
+            }
+        }
+
         oracleResults[ref.orderId][ref.evidenceIndex] = OracleResult({
             fulfilled: true,
             delivered: delivered,
@@ -244,10 +263,37 @@ contract EvidenceRegistryV3 is Ownable2Step, Pausable, FunctionsClient {
         emit CallbackGasLimitUpdated(oldCallbackGasLimit, newCallbackGasLimit);
     }
 
-    function setRequestSource(string calldata newRequestSource) external onlyOwner {
+    // M1: propose/commit pattern mirrors Marketplace's 7-day delay — no instant replacement.
+    function proposeRequestSource(string calldata newRequestSource) external onlyOwner {
         require(bytes(newRequestSource).length > 0, "Request source cannot be empty");
+        require(pendingRequestSource.sourceHash == bytes32(0), "Existing proposal must be cancelled first");
+
+        bytes32 hash = keccak256(bytes(newRequestSource));
+        uint64 readyAt = uint64(block.timestamp) + REQUEST_SOURCE_DELAY;
+
+        pendingRequestSource = PendingSource({ sourceHash: hash, readyAt: readyAt });
+
+        emit RequestSourceProposed(hash, bytes(newRequestSource).length, readyAt);
+    }
+
+    function commitRequestSource(string calldata newRequestSource) external onlyOwner {
+        bytes32 hash = keccak256(bytes(newRequestSource));
+        require(pendingRequestSource.sourceHash == hash, "Source does not match pending proposal");
+        require(block.timestamp >= pendingRequestSource.readyAt, "Proposal delay has not elapsed");
+
         requestSource = newRequestSource;
-        emit RequestSourceUpdated(keccak256(bytes(newRequestSource)), bytes(newRequestSource).length);
+        delete pendingRequestSource;
+
+        emit RequestSourceUpdated(hash, bytes(newRequestSource).length);
+    }
+
+    function cancelPendingRequestSource() external onlyOwner {
+        bytes32 hash = pendingRequestSource.sourceHash;
+        require(hash != bytes32(0), "No pending proposal");
+
+        delete pendingRequestSource;
+
+        emit RequestSourceProposalCancelled(hash);
     }
 
     function setEncryptedSecretsReference(bytes calldata newEncryptedSecretsReference) external onlyOwner {

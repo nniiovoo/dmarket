@@ -138,21 +138,28 @@ describe("KlerosV2DisputeAdapter", function () {
         .withArgs(orderId, 1n, seller.address, fee);
     });
 
-    it("refunds excess fee to caller", async function () {
+    it("over-payment stored in pendingRefunds (pull-payment, H2 fix)", async function () {
       const ctx = await deploy();
       const orderId = await setupDisputedOrder(ctx);
       const { ethers, buyer, adapter, arbitrator } = ctx;
       const fee = await arbitrator.arbitrationCost("0x");
-      const overpay = fee + ethers.parseEther("0.5");
+      const excess = ethers.parseEther("0.5");
+      const overpay = fee + excess;
 
+      await adapter.connect(buyer).escalateToKleros(orderId, { value: overpay });
+
+      // Refund is stored, not sent immediately.
+      expect(await adapter.pendingRefunds(buyer.address)).to.equal(excess);
+
+      // withdrawRefund sends it back.
       const balBefore = await ethers.provider.getBalance(buyer.address);
-      const tx = await adapter.connect(buyer).escalateToKleros(orderId, { value: overpay });
+      const tx = await adapter.connect(buyer).withdrawRefund();
       const receipt = await tx.wait();
       const gas = receipt!.gasUsed * receipt!.gasPrice;
       const balAfter = await ethers.provider.getBalance(buyer.address);
 
-      // Net spend should be exactly the fee + gas.
-      expect(balBefore - balAfter - gas).to.equal(fee);
+      expect(balAfter - balBefore + gas).to.equal(excess);
+      expect(await adapter.pendingRefunds(buyer.address)).to.equal(0n);
     });
 
     it("reverts NotPartyOfOrder for unrelated wallet", async function () {
@@ -419,8 +426,119 @@ describe("KlerosV2DisputeAdapter", function () {
     });
   });
 
+  describe("H1: disputeID=0 collision fix", function () {
+    it("orderEscalated is false before escalation and true after", async function () {
+      const ctx = await deploy();
+      const orderId = await setupDisputedOrder(ctx);
+      const { buyer, adapter, arbitrator } = ctx;
+      const fee = await arbitrator.arbitrationCost("0x");
+
+      expect(await adapter.orderEscalated(orderId)).to.equal(false);
+      await adapter.connect(buyer).escalateToKleros(orderId, { value: fee });
+      expect(await adapter.orderEscalated(orderId)).to.equal(true);
+    });
+
+    it("AlreadyEscalated fires even when Kleros assigns disputeID=0", async function () {
+      const ctx = await deploy();
+      const orderId = await setupDisputedOrder(ctx);
+      const { buyer, seller, adapter, arbitrator } = ctx;
+      const fee = await arbitrator.arbitrationCost("0x");
+
+      // Force Kleros mock to start from disputeID=0
+      await arbitrator.setNextDisputeID(0n);
+      await adapter.connect(buyer).escalateToKleros(orderId, { value: fee });
+
+      expect(await adapter.orderToDisputeID(orderId)).to.equal(0n);  // stored as 0
+      expect(await adapter.orderEscalated(orderId)).to.equal(true);   // but flag is set
+
+      // Second escalate must revert even though orderToDisputeID==0
+      await expect(
+        adapter.connect(seller).escalateToKleros(orderId, { value: fee })
+      ).to.be.revertedWithCustomError(adapter, "AlreadyEscalated");
+    });
+
+    it("rule() with disputeID=0 resolves correctly", async function () {
+      const ctx = await deploy();
+      const orderId = await setupDisputedOrder(ctx);
+      const { buyer, adapter, arbitrator, marketplace } = ctx;
+      const fee = await arbitrator.arbitrationCost("0x");
+
+      await arbitrator.setNextDisputeID(0n);
+      await adapter.connect(buyer).escalateToKleros(orderId, { value: fee });
+
+      expect(await adapter.disputeToOrderID(0n)).to.equal(orderId);
+
+      await advanceCooldown(ctx);
+
+      await expect(arbitrator.giveRuling(0n, 1n))
+        .to.emit(adapter, "KlerosRulingApplied")
+        .withArgs(orderId, 0n, 1n);
+
+      const order = await marketplace.getOrder(orderId);
+      expect(order.status).to.equal(OrderStatus.Refunded);
+    });
+  });
+
+  describe("H2 + withdrawRefund", function () {
+    it("withdrawRefund reverts NoRefundPending when nothing owed", async function () {
+      const { other, adapter } = await deploy();
+      await expect(
+        adapter.connect(other).withdrawRefund()
+      ).to.be.revertedWithCustomError(adapter, "NoRefundPending");
+    });
+
+    it("withdrawRefund clears pending balance and emits RefundWithdrawn", async function () {
+      const ctx = await deploy();
+      const orderId = await setupDisputedOrder(ctx);
+      const { ethers, buyer, adapter, arbitrator } = ctx;
+      const fee = await arbitrator.arbitrationCost("0x");
+      const excess = ethers.parseEther("0.3");
+      await adapter.connect(buyer).escalateToKleros(orderId, { value: fee + excess });
+
+      await expect(adapter.connect(buyer).withdrawRefund())
+        .to.emit(adapter, "RefundWithdrawn")
+        .withArgs(buyer.address, excess);
+
+      expect(await adapter.pendingRefunds(buyer.address)).to.equal(0n);
+    });
+  });
+
+  describe("L1: withdrawBalance", function () {
+    it("only owner can call withdrawBalance", async function () {
+      const { other, adapter } = await deploy();
+      await expect(
+        adapter.connect(other).withdrawBalance(other.address)
+      ).to.be.revertedWithCustomError(adapter, "OwnableUnauthorizedAccount");
+    });
+
+    it("owner can drain stranded ETH from adapter", async function () {
+      const { ethers, owner, adapter } = await deploy();
+      const adapterAddr = await adapter.getAddress();
+
+      // Send ETH directly to adapter (simulates accidental transfer)
+      await owner.sendTransaction({ to: adapterAddr, value: ethers.parseEther("0.1") });
+      expect(await ethers.provider.getBalance(adapterAddr)).to.equal(ethers.parseEther("0.1"));
+
+      const balBefore = await ethers.provider.getBalance(owner.address);
+      const tx = await adapter.connect(owner).withdrawBalance(owner.address);
+      const receipt = await tx.wait();
+      const gas = receipt!.gasUsed * receipt!.gasPrice;
+      const balAfter = await ethers.provider.getBalance(owner.address);
+
+      expect(balAfter - balBefore + gas).to.equal(ethers.parseEther("0.1"));
+      expect(await ethers.provider.getBalance(adapterAddr)).to.equal(0n);
+    });
+
+    it("withdrawBalance reverts when balance is zero", async function () {
+      const { owner, adapter } = await deploy();
+      await expect(
+        adapter.connect(owner).withdrawBalance(owner.address)
+      ).to.be.revertedWith("No balance");
+    });
+  });
+
   describe("receive()", function () {
-    it("accepts plain ETH transfer (for refund buffer)", async function () {
+    it("accepts plain ETH transfer", async function () {
       const { ethers, owner, adapter } = await deploy();
       const adapterAddress = await adapter.getAddress();
       const balBefore = await ethers.provider.getBalance(adapterAddress);

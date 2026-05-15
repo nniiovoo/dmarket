@@ -303,6 +303,49 @@ describe("V3.1 Marketplace (createAndPayWithAuth)", function () {
     });
   });
 
+  describe("invalidateNonce", function () {
+    it("increments nonce and emits NonceInvalidated", async function () {
+      const fx = await deploy();
+      expect(await fx.marketplace.authNonces(fx.buyer.address)).to.equal(0n);
+
+      await expect(fx.marketplace.connect(fx.buyer).invalidateNonce())
+        .to.emit(fx.marketplace, "NonceInvalidated")
+        .withArgs(fx.buyer.address, 0n, 1n);
+
+      expect(await fx.marketplace.authNonces(fx.buyer.address)).to.equal(1n);
+    });
+
+    it("invalidated nonce cannot be used — prior signature is rejected", async function () {
+      const fx = await deploy();
+      const { auth, signature } = await buildAuthAndSig(fx, { nonce: 0n });
+
+      // Buyer invalidates nonce=0 before the relayer submits.
+      await fx.marketplace.connect(fx.buyer).invalidateNonce();
+
+      await expect(
+        fx.marketplace.connect(fx.relayer).createAndPayWithAuth(auth, signature, { value: fx.amount })
+      ).to.be.revertedWithCustomError(fx.marketplace, "AuthNonceMismatch");
+    });
+
+    it("can transact with new nonce after invalidation", async function () {
+      const fx = await deploy();
+      await fx.marketplace.connect(fx.buyer).invalidateNonce(); // nonce is now 1
+
+      const { auth, signature } = await buildAuthAndSig(fx, { nonce: 1n });
+      await expect(
+        fx.marketplace.connect(fx.relayer).createAndPayWithAuth(auth, signature, { value: fx.amount })
+      ).to.emit(fx.marketplace, "PaymentAuthExecuted");
+    });
+
+    it("each buyer invalidates their own nonce independently", async function () {
+      const fx = await deploy();
+      await fx.marketplace.connect(fx.buyer).invalidateNonce();
+
+      expect(await fx.marketplace.authNonces(fx.buyer.address)).to.equal(1n);
+      expect(await fx.marketplace.authNonces(fx.stranger.address)).to.equal(0n);
+    });
+  });
+
   describe("cross-signer replay isolation", function () {
     it("two different buyers maintain independent nonces", async function () {
       const fx = await deploy();

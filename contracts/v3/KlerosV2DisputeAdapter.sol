@@ -38,9 +38,14 @@ contract KlerosV2DisputeAdapter is Ownable2Step, IArbitrableV2 {
     uint256 public templateId;           // dispute template index (Kleros V2 uses templates)
     string public templateRegistryURI;   // optional UI pointer
 
+    // orderToDisputeID stores the raw Kleros disputeID (may be 0 for the first dispute).
+    // Use orderEscalated to check whether an order has been escalated, not orderToDisputeID != 0.
     mapping(uint256 => uint256) public orderToDisputeID;
+    mapping(uint256 => bool)    public orderEscalated;
     mapping(uint256 => uint256) public disputeToOrderID;
     mapping(uint256 => address) public disputeEscalatedBy;
+    // Pull-payment refunds for over-paid escalation fees (H2 fix).
+    mapping(address => uint256) public pendingRefunds;
     // Stored ruling waiting to be applied (set when Kleros rules before the
     // marketplace's 3-day dispute cooldown elapses).
     mapping(uint256 => uint256) public pendingRulings;
@@ -52,6 +57,8 @@ contract KlerosV2DisputeAdapter is Ownable2Step, IArbitrableV2 {
     event ArbitratorExtraDataUpdated(bytes oldData, bytes newData);
     event TemplateIdUpdated(uint256 oldId, uint256 newId);
     event TemplateRegistryURIUpdated(string newURI);
+    event RefundWithdrawn(address indexed recipient, uint256 amount);
+    event BalanceWithdrawn(address indexed to, uint256 amount);
 
     error ZeroAddress();
     error OrderNotDisputed();
@@ -62,6 +69,7 @@ contract KlerosV2DisputeAdapter is Ownable2Step, IArbitrableV2 {
     error UnknownDispute();
     error InvalidRuling();
     error NoPendingRuling();
+    error NoRefundPending();
 
     constructor(
         address _arbitrator,
@@ -77,7 +85,26 @@ contract KlerosV2DisputeAdapter is Ownable2Step, IArbitrableV2 {
     }
 
     receive() external payable {
-        // Accept excess arbitration fee refunds and over-paid eth.
+        // Accept ETH sent back by Kleros and any accidental transfers.
+    }
+
+    /// Withdraw over-paid escalation fee refund (pull-payment, H2 fix).
+    function withdrawRefund() external {
+        uint256 amount = pendingRefunds[msg.sender];
+        if (amount == 0) revert NoRefundPending();
+        delete pendingRefunds[msg.sender];
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "Withdraw failed");
+        emit RefundWithdrawn(msg.sender, amount);
+    }
+
+    /// Owner can recover any ETH stranded in this contract (L1 fix).
+    function withdrawBalance(address payable to) external onlyOwner {
+        uint256 bal = address(this).balance;
+        require(bal > 0, "No balance");
+        (bool ok, ) = to.call{value: bal}("");
+        require(ok, "Withdraw failed");
+        emit BalanceWithdrawn(to, bal);
     }
 
     /// Anyone who is buyer or seller of a Disputed order can pay Kleros's
@@ -86,7 +113,8 @@ contract KlerosV2DisputeAdapter is Ownable2Step, IArbitrableV2 {
     function escalateToKleros(uint256 orderId) external payable returns (uint256 disputeID) {
         IEscrowMarketplaceV3Adapter.Order memory order = marketplace.getOrder(orderId);
         if (order.status != IEscrowMarketplaceV3Adapter.OrderStatus.Disputed) revert OrderNotDisputed();
-        if (orderToDisputeID[orderId] != 0) revert AlreadyEscalated();
+        // H1: use orderEscalated, not orderToDisputeID != 0, to support Kleros disputeID=0.
+        if (orderEscalated[orderId]) revert AlreadyEscalated();
         if (msg.sender != order.buyer && msg.sender != order.seller) revert NotPartyOfOrder();
 
         uint256 cost = arbitrator.arbitrationCost(arbitratorExtraData);
@@ -94,15 +122,16 @@ contract KlerosV2DisputeAdapter is Ownable2Step, IArbitrableV2 {
 
         disputeID = arbitrator.createDispute{value: cost}(2, arbitratorExtraData);
         orderToDisputeID[orderId] = disputeID;
+        orderEscalated[orderId] = true;
         disputeToOrderID[disputeID] = orderId;
         disputeEscalatedBy[disputeID] = msg.sender;
 
         emit DisputeEscalatedToKleros(orderId, disputeID, msg.sender, cost);
         emit Dispute(arbitrator, disputeID, templateId, templateRegistryURI);
 
+        // H2: pull-payment instead of direct call to avoid blocking by non-payable msg.sender.
         if (msg.value > cost) {
-            (bool ok, ) = payable(msg.sender).call{value: msg.value - cost}("");
-            require(ok, "Refund failed");
+            pendingRefunds[msg.sender] += msg.value - cost;
         }
     }
 

@@ -48,6 +48,8 @@ contract EscrowMarketplaceV3_1 is EscrowMarketplaceV3, EIP712 {
     error AuthInvalidSignature(address recovered, address expected);
     error AuthZeroBuyer();
 
+    event NonceInvalidated(address indexed buyer, uint256 invalidatedNonce, uint256 newNonce);
+
     constructor(
         address vaultAddress,
         address routerAddress,
@@ -95,6 +97,15 @@ contract EscrowMarketplaceV3_1 is EscrowMarketplaceV3, EIP712 {
         emit PaymentAuthExecuted(orderId, auth.buyer, msg.sender, auth.nonce);
 
         return orderId;
+    }
+
+    /// Buyer can skip their current nonce to invalidate a pending (e.g. expired
+    /// but not yet consumed) authorization. Prevents re-use if the signed auth
+    /// was shared with an untrusted relayer.
+    function invalidateNonce() external {
+        uint256 old = authNonces[msg.sender];
+        authNonces[msg.sender] = old + 1;
+        emit NonceInvalidated(msg.sender, old, old + 1);
     }
 
     // Exposed so the frontend / SDK can show the user the exact EIP-712
