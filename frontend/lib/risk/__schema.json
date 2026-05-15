@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "risk-rule",
+  "title": "Rule",
+  "type": "object",
+  "required": ["id", "description", "when", "then", "priority"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "priority": { "type": "number" },
+    "enabled": { "type": "boolean", "default": true },
+    "when": { "$ref": "#/definitions/Condition" },
+    "then": { "$ref": "#/definitions/RuleAction" }
+  },
+  "definitions": {
+    "Condition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["op", "path", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "op": { "type": "string", "enum": ["eq", "ne", "gt", "gte", "lt", "lte"] },
+            "path": { "type": "string" },
+            "value": { "oneOf": [{ "type": "number" }, { "type": "string" }, { "type": "boolean" }] }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["op", "path", "values"],
+          "additionalProperties": false,
+          "properties": {
+            "op": { "type": "string", "enum": ["in", "nin"] },
+            "path": { "type": "string" },
+            "values": { "type": "array", "items": { "oneOf": [{ "type": "number" }, { "type": "string" }] } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["op", "clauses"],
+          "additionalProperties": false,
+          "properties": {
+            "op": { "type": "string", "enum": ["and", "or"] },
+            "clauses": { "type": "array", "items": { "$ref": "#/definitions/Condition" }, "minItems": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["op", "clause"],
+          "additionalProperties": false,
+          "properties": {
+            "op": { "type": "string", "enum": ["not"] },
+            "clause": { "$ref": "#/definitions/Condition" }
+          }
+        }
+      ]
+    },
+    "RuleAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "reason"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "type": "string", "enum": ["block", "require_review", "require_second_confirm"] },
+            "reason": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "tag"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "type": "string", "enum": ["tag"] },
+            "tag": { "type": "string" }
+          }
+        }
+      ]
+    }
+  }
+}
