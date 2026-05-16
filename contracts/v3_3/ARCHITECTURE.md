@@ -150,17 +150,39 @@ cancelListing(id) — always allowed, even when paused
 | Fee on completion | none | `(amount × feeRateBps) / 10 000`, default 1 %, ≤ 10 % |
 | Fee destination | n/a | `RevenueDistributor` via `deposit` / `depositERC20` |
 | Seller requirement | any address | `ShopNFT.shopIdOf(seller) != 0` (else `NoShopAssociated`) |
-| Kleros adapter | yes (K.H.3) | **not yet** — `resolveDispute` stays `onlyOwner` for K.3b |
+| Kleros adapter | yes (H.3) | **yes (L.1)** — pull-mode mirror of v3.2 adapter |
 
-## What's NOT in K.3b (deferred)
+## Kleros V2 dispute adapter (Phase L)
 
-- **Kleros adapter for v3.3.** v3.3 reuses v3.2's `onlyOwner`
-  resolveDispute pathway. Wiring the K.H.3 adapter to v3.3 is K.3c (or
-  later).
-- **v3.3 indexer.** No `OnChainOrderV3_3` table yet. K.5 will add it
-  alongside a Distributor / Shares event mirror.
-- **Frontend.** No `/shop/{id}` page, no share-market UI, no
-  shareholder dashboard. K.5 / K.6.
+`KlerosV2DisputeAdapterV3_3` (deployed L.1) is a verbatim mirror of the
+v3.2 adapter's pull-mode design: marketplace ownership is transferred
+to the adapter, and `resolveDispute` becomes reachable only through
+(1) a Kleros V2 ruling, (2) the adapter's timelocked emergency-refund
+flow, or (3) the adapter owner's `executeOnMarketplace` pass-through.
+The full design rationale (deferred-and-applied rulings, fee gating to
+order parties, RULING_REFUSE → buyer normalisation, 30-day Kleros
+timeout + 7-day emergency timelock) lives in
+`contracts/v3_2/ARCHITECTURE.md` §4 — v3.3's adapter copies it.
+
+**v3.3-specific note**: a "favor seller" ruling (refundBuyer=false)
+routes through `marketplace.resolveDispute → _completeOrder`, which
+already pays the platform fee into the `RevenueDistributor`
+(shareholders earn from disputed-then-resolved orders too). The
+adapter is purely routing — it does not duplicate any
+revenue-distribution logic.
+
+The indexer (Phase L.3) mirrors `DisputeEscalated` /
+`DisputeRuled` events into four nullable columns on
+`OnChainOrderV3_3` — `klerosDisputeId`, `disputeEscalatedAt`,
+`klerosRuling`, `klerosRuledAt` — so the frontend can render a
+"Awaiting Kleros ruling #N" badge without any wagmi reads.
+
+## What's NOT in v3.3 today (deferred)
+
+- **v3.3-side lifecycle actions on the order page.** The v3.3 order
+  detail page is read-only (no Mark Shipped / Confirm Received buttons
+  yet). Disputed orders show the Kleros escalation UI; everything else
+  is informational.
 - **Mainnet.** Audit + share-tokenisation legal review must come first.
   Every contract still carries the `WIP-DRAFT — NOT AUDITED — DO NOT
   DEPLOY TO MAINNET` header in its NatSpec.

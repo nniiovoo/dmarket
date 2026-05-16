@@ -72,6 +72,12 @@ export const GET = withErrorBoundary(async (_request: NextRequest, ctx: Ctx) => 
     disputedAt: order.disputedAt?.toISOString() ?? null,
     feeAmount: order.feeAmount,
     sellerAmount: order.sellerAmount,
+    // Kleros V2 mirror fields (Phase L.3). Null until the adapter
+    // indexer records DisputeEscalated / DisputeRuled.
+    klerosDisputeId: order.klerosDisputeId,
+    disputeEscalatedAt: order.disputeEscalatedAt?.toISOString() ?? null,
+    klerosRuling: order.klerosRuling,
+    klerosRuledAt: order.klerosRuledAt?.toISOString() ?? null,
     lastEventBlock: order.lastEventBlock.toString(),
     lastEventTxHash: order.lastEventTxHash,
     lastSyncedAt: order.lastSyncedAt.toISOString()

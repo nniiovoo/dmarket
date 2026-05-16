@@ -190,6 +190,7 @@ interface V3_3ShopEconomyStatus {
     distributor: V3_3ContractCursor;
     shareMarket: V3_3ContractCursor;
     marketplace: V3_3ContractCursor;
+    klerosAdapter: V3_3ContractCursor;
   };
   tableCounts: {
     ShopNFT: number;
@@ -197,6 +198,8 @@ interface V3_3ShopEconomyStatus {
     ShopRevenueEvent: number;
     ShopListing: number;
     OnChainOrderV3_3: number;
+    escalatedCount: number;
+    ruledCount: number;
   };
 }
 
@@ -218,10 +221,13 @@ async function buildV3_3ShopEconomyStatus(
   const marketplace =
     process.env.NEXT_PUBLIC_V3_3_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS ??
     process.env.V3_3_ARBITRUMSEPOLIA_MARKETPLACE_ADDRESS;
+  const klerosAdapter =
+    process.env.NEXT_PUBLIC_V3_3_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS ??
+    process.env.V3_3_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS;
 
   // If absolutely nothing is configured, the whole block is null so
   // status dashboards can render "v3.3 not deployed".
-  if (!shopNft && !shopShares && !distributor && !shareMarket && !marketplace) {
+  if (!shopNft && !shopShares && !distributor && !shareMarket && !marketplace && !klerosAdapter) {
     return null;
   }
 
@@ -276,12 +282,18 @@ async function buildV3_3ShopEconomyStatus(
     };
   }
 
-  const [shopCount, holdingCount, revenueCount, listingCount, orderCount] = await Promise.all([
+  const [shopCount, holdingCount, revenueCount, listingCount, orderCount, escalatedCount, ruledCount] = await Promise.all([
     prisma.shopNFT.count(),
     prisma.shopShareHolding.count({ where: { NOT: { balance: "0" } } }),
     prisma.shopRevenueEvent.count(),
     prisma.shopListing.count(),
-    prisma.onChainOrderV3_3.count()
+    prisma.onChainOrderV3_3.count(),
+    prisma.onChainOrderV3_3.count({
+      where: { chainId: arbitrumSepolia.id, klerosDisputeId: { not: null } }
+    }),
+    prisma.onChainOrderV3_3.count({
+      where: { chainId: arbitrumSepolia.id, klerosRuling: { not: null } }
+    })
   ]);
 
   const result: V3_3ShopEconomyStatus = {
@@ -291,14 +303,17 @@ async function buildV3_3ShopEconomyStatus(
       shopShares: cursorFor(shopShares),
       distributor: cursorFor(distributor),
       shareMarket: cursorFor(shareMarket),
-      marketplace: cursorFor(marketplace)
+      marketplace: cursorFor(marketplace),
+      klerosAdapter: cursorFor(klerosAdapter)
     },
     tableCounts: {
       ShopNFT: shopCount,
       ShopShareHolding: holdingCount,
       ShopRevenueEvent: revenueCount,
       ShopListing: listingCount,
-      OnChainOrderV3_3: orderCount
+      OnChainOrderV3_3: orderCount,
+      escalatedCount,
+      ruledCount
     }
   };
   if (currentBlockErr) {

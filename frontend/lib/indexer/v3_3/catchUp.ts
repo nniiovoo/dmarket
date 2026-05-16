@@ -17,6 +17,7 @@ import {
 import { compareLogs, type IndexedLog } from "../eventDecoder";
 import {
   decodeDistributorLog,
+  decodeKlerosAdapterLog,
   decodeMarketplaceLog,
   decodeShareMarketLog,
   decodeShopNftLog,
@@ -29,9 +30,11 @@ import {
   applyShopSharesEvents
 } from "./applyEvents";
 import { applyMarketplaceEvents } from "./applyMarketplaceEvent";
+import { applyKlerosAdapterEvents } from "./applyKlerosEvent";
 import {
   getContractAddress,
   getDeploymentBlock,
+  getV3_3MarketplaceAddress,
   V3_3_CONTRACT_TYPES,
   type V3_3ContractType
 } from "./config";
@@ -178,6 +181,22 @@ export async function processLogs(
         .filter((e): e is NonNullable<typeof e> => e !== undefined);
       const marketAddr = sorted[0]?.address.toLowerCase() ?? "";
       await applyMarketplaceEvents(db, chainId, marketAddr, events);
+      return;
+    }
+    case "klerosAdapter": {
+      const events = sorted
+        .map((l) => decodeKlerosAdapterLog(l, timestamps.get(l.blockNumber) ?? 0n))
+        .filter((e): e is NonNullable<typeof e> => e !== undefined);
+      // The adapter doesn't emit the marketplace address; resolve once
+      // from env. There's exactly one v3.3 marketplace per chain today.
+      const marketAddr = getV3_3MarketplaceAddress(chainId);
+      if (!marketAddr) {
+        console.warn(
+          `[v3.3 klerosAdapter chain ${chainId}] no v3.3 marketplace address configured; cannot apply ${events.length} adapter events`
+        );
+        return;
+      }
+      await applyKlerosAdapterEvents(db, chainId, marketAddr, events);
       return;
     }
   }

@@ -8,6 +8,7 @@ import shopSharesAbiJson from "../../../abi/ShopShares.json";
 import revenueDistributorAbiJson from "../../../abi/RevenueDistributor.json";
 import shareMarketAbiJson from "../../../abi/ShareMarket.json";
 import marketplaceAbiJson from "../../../abi/EscrowMarketplaceV3_3.json";
+import klerosAdapterAbiJson from "../../../abi/KlerosV2DisputeAdapterV3_3.json";
 
 import { prisma } from "../../db";
 import { normalizeLogs } from "../catchUp";
@@ -20,7 +21,8 @@ const ABI_BY_TYPE = {
   shopShares: shopSharesAbiJson,
   distributor: revenueDistributorAbiJson,
   shareMarket: shareMarketAbiJson,
-  marketplace: marketplaceAbiJson
+  marketplace: marketplaceAbiJson,
+  klerosAdapter: klerosAdapterAbiJson
 } as const;
 
 /// Returns a list of stoppers — one per contract subscription that

@@ -16,6 +16,7 @@ import shopSharesAbiJson from "../../../abi/ShopShares.json";
 import revenueDistributorAbiJson from "../../../abi/RevenueDistributor.json";
 import shareMarketAbiJson from "../../../abi/ShareMarket.json";
 import marketplaceAbiJson from "../../../abi/EscrowMarketplaceV3_3.json";
+import klerosAdapterAbiJson from "../../../abi/KlerosV2DisputeAdapterV3_3.json";
 
 import type { IndexedLog } from "../eventDecoder";
 
@@ -24,6 +25,7 @@ const shopSharesAbi = shopSharesAbiJson as Abi;
 const revenueDistributorAbi = revenueDistributorAbiJson as Abi;
 const shareMarketAbi = shareMarketAbiJson as Abi;
 const marketplaceAbi = marketplaceAbiJson as Abi;
+const klerosAdapterAbi = klerosAdapterAbiJson as Abi;
 
 interface LogContext {
   blockNumber: bigint;
@@ -457,6 +459,112 @@ export function decodeMarketplaceLog(
       // / FeeRateUpdated / FeeRecipientUpdated / DistributorUpdated /
       // Paused / Unpaused / Ownership* — admin or auxiliary events
       // that don't affect the order projection.
+      return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// KlerosV2DisputeAdapterV3_3 (Phase L.3)
+//
+// Mirror of the v3.2 adapter decoder. The adapter doesn't carry the
+// marketplace address on each event, so the applier resolves it from
+// env / a single on-chain read at the call site.
+// ---------------------------------------------------------------------------
+
+export type KlerosAdapterEvent =
+  | (LogContext & {
+      kind: "Escalated";
+      orderId: bigint;
+      klerosDisputeId: bigint;
+      by: Address;
+      feePaid: bigint;
+    })
+  | (LogContext & {
+      kind: "Ruled";
+      orderId: bigint;
+      klerosDisputeId: bigint;
+      ruling: bigint;
+    })
+  | (LogContext & {
+      kind: "RulingDeferred";
+      orderId: bigint;
+      klerosDisputeId: bigint;
+      ruling: bigint;
+      reason: string;
+    })
+  | (LogContext & {
+      kind: "EmergencyProposed";
+      orderId: bigint;
+      refundBuyer: boolean;
+      unlocksAt: bigint;
+    })
+  | (LogContext & { kind: "EmergencyExecuted"; orderId: bigint; refundBuyer: boolean })
+  | (LogContext & { kind: "EmergencyCancelled"; orderId: bigint });
+
+export function decodeKlerosAdapterLog(
+  log: IndexedLog,
+  blockTimestamp: bigint
+): KlerosAdapterEvent | undefined {
+  let decoded: { eventName: string; args: Record<string, unknown> };
+  try {
+    decoded = decodeEventLog({
+      abi: klerosAdapterAbi,
+      data: log.data,
+      topics: log.topics
+    }) as unknown as { eventName: string; args: Record<string, unknown> };
+  } catch {
+    return undefined;
+  }
+  const ctx = ctxOf(log, blockTimestamp);
+  const a = decoded.args;
+  switch (decoded.eventName) {
+    case "DisputeEscalated":
+      return {
+        ...ctx,
+        kind: "Escalated",
+        orderId: a.orderId as bigint,
+        klerosDisputeId: a.klerosDisputeId as bigint,
+        by: a.by as Address,
+        feePaid: a.feePaid as bigint
+      };
+    case "DisputeRuled":
+      return {
+        ...ctx,
+        kind: "Ruled",
+        orderId: a.orderId as bigint,
+        klerosDisputeId: a.klerosDisputeId as bigint,
+        ruling: a.ruling as bigint
+      };
+    case "RulingDeferred":
+      return {
+        ...ctx,
+        kind: "RulingDeferred",
+        orderId: a.orderId as bigint,
+        klerosDisputeId: a.klerosDisputeId as bigint,
+        ruling: a.ruling as bigint,
+        reason: String(a.reason ?? "")
+      };
+    case "EmergencyRefundProposed":
+      return {
+        ...ctx,
+        kind: "EmergencyProposed",
+        orderId: a.orderId as bigint,
+        refundBuyer: Boolean(a.refundBuyer),
+        unlocksAt: a.unlocksAt as bigint
+      };
+    case "EmergencyRefundExecuted":
+      return {
+        ...ctx,
+        kind: "EmergencyExecuted",
+        orderId: a.orderId as bigint,
+        refundBuyer: Boolean(a.refundBuyer)
+      };
+    case "EmergencyRefundCancelled":
+      return { ...ctx, kind: "EmergencyCancelled", orderId: a.orderId as bigint };
+    default:
+      // Dispute / Ruling (ERC-792 proxies), RefundWithdrawn,
+      // MarketplaceCallExecuted, OwnershipTransfer*, *Updated setters —
+      // don't affect the order projection.
       return undefined;
   }
 }

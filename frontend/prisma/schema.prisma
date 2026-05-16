@@ -650,6 +650,15 @@ model OnChainOrderV3_3 {
   disputedAt         DateTime?
   feeAmount          String?
   sellerAmount       String?
+  // Kleros V2 adapter mirror columns (Phase L.3). Same semantics as the
+  // v3.2 mirror — populated by the independent v3.3 KlerosAdapter event
+  // stream, which shares IndexerStateV3_3ShopEconomy with contractType
+  // = 'klerosAdapter'. `klerosDisputeId` stays TEXT because Kleros V2
+  // disputeIds are uint256.
+  klerosDisputeId    String?
+  disputeEscalatedAt DateTime?
+  klerosRuling       Int? // 0 refused → buyer (normalised), 1 buyer, 2 seller
+  klerosRuledAt      DateTime?
   lastEventBlock     BigInt
   lastEventTxHash    String
   lastSyncedAt       DateTime @default(now())
@@ -660,4 +669,5 @@ model OnChainOrderV3_3 {
   @@index([shopId])
   @@index([status])
   @@index([chainId, marketplaceAddress])
+  @@index([klerosDisputeId])
 }

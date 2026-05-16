@@ -22,14 +22,16 @@ export type V3_3ContractType =
   | "shopShares"
   | "distributor"
   | "shareMarket"
-  | "marketplace";
+  | "marketplace"
+  | "klerosAdapter";
 
 export const V3_3_CONTRACT_TYPES: readonly V3_3ContractType[] = [
   "shopNft",
   "shopShares",
   "distributor",
   "shareMarket",
-  "marketplace"
+  "marketplace",
+  "klerosAdapter"
 ] as const;
 
 // -------------------------------------------------------------------------
@@ -84,6 +86,14 @@ export function getV3_3MarketplaceAddress(chainId: number): Address | undefined 
   );
 }
 
+export function getV3_3KlerosAdapterAddress(chainId: number): Address | undefined {
+  if (chainId !== arbitrumSepolia.id) return undefined;
+  return readAddressEnv(
+    "NEXT_PUBLIC_V3_3_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS",
+    "V3_3_ARBITRUMSEPOLIA_KLEROS_ADAPTER_ADDRESS"
+  );
+}
+
 export function getContractAddress(
   chainId: number,
   contractType: V3_3ContractType
@@ -99,6 +109,8 @@ export function getContractAddress(
       return getShareMarketAddress(chainId);
     case "marketplace":
       return getV3_3MarketplaceAddress(chainId);
+    case "klerosAdapter":
+      return getV3_3KlerosAdapterAddress(chainId);
   }
 }
 
@@ -108,15 +120,16 @@ export function getContractAddress(
 
 function chainHasV3_3ShopEconomy(chainId: number): boolean {
   // We need at least one contract configured. In practice deploys are
-  // batched (K.1 → K.3a → K.3b → K.4) but a partial config shouldn't
-  // brick the daemon — each contract is iterated independently in the
-  // catch-up loop.
+  // batched (K.1 → K.3a → K.3b → K.4 → L.1) but a partial config
+  // shouldn't brick the daemon — each contract is iterated independently
+  // in the catch-up loop.
   return Boolean(
     getShopNftAddress(chainId) ||
       getShopSharesAddress(chainId) ||
       getDistributorAddress(chainId) ||
       getShareMarketAddress(chainId) ||
-      getV3_3MarketplaceAddress(chainId)
+      getV3_3MarketplaceAddress(chainId) ||
+      getV3_3KlerosAdapterAddress(chainId)
   );
 }
 
@@ -143,11 +156,12 @@ function readPositiveBigIntEnv(name: string, fallback: bigint): bigint {
 }
 
 // Defaults captured from Arbitrum Sepolia tx receipts:
-//   ShopNFT (K.1):       0xca9e1a87… in block 268_768_884
-//   ShopShares (K.3a):   0xb46dec32… in block 268_775_538
-//   Distributor (K.3a):  0xf1f0d2ed… in block 268_775_609
-//   Marketplace (K.3b):  0x00479cc7… in block 268_777_562
-//   ShareMarket (K.4):   0xd9cd0fbc… in block 268_780_661
+//   ShopNFT (K.1):         0xca9e1a87… in block 268_768_884
+//   ShopShares (K.3a):     0xb46dec32… in block 268_775_538
+//   Distributor (K.3a):    0xf1f0d2ed… in block 268_775_609
+//   Marketplace (K.3b):    0x00479cc7… in block 268_777_562
+//   ShareMarket (K.4):     0xd9cd0fbc… in block 268_780_661
+//   KlerosAdapter (L.1):   0xbdd54667… in block 268_796_181
 // Defaults are one block earlier so the deploy log itself is in range.
 
 export function getDeploymentBlock(
@@ -166,6 +180,8 @@ export function getDeploymentBlock(
       return readPositiveBigIntEnv("INDEXER_V3_3_SHARE_MARKET_FROM_BLOCK", 268_780_660n);
     case "marketplace":
       return readPositiveBigIntEnv("INDEXER_V3_3_MARKETPLACE_FROM_BLOCK", 268_777_561n);
+    case "klerosAdapter":
+      return readPositiveBigIntEnv("INDEXER_V3_3_KLEROS_ADAPTER_FROM_BLOCK", 268_796_180n);
   }
 }
 
