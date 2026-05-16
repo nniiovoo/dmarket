@@ -61,6 +61,10 @@ const abiTargets = [
   {
     artifact: "artifacts/contracts/v3_3/ShareMarket.sol/ShareMarket.json",
     output: "frontend/abi/ShareMarket.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3_3/KlerosV2DisputeAdapterV3_3.sol/KlerosV2DisputeAdapterV3_3.json",
+    output: "frontend/abi/KlerosV2DisputeAdapterV3_3.json"
   }
 ];
 
