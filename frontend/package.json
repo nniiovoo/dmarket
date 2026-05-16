@@ -20,6 +20,10 @@
     "indexer:v3_2:once": "tsx scripts/indexerV3_2.ts --once",
     "indexer:v3_2:kleros": "tsx scripts/indexerV3_2Kleros.ts",
     "indexer:v3_2:kleros:once": "tsx scripts/indexerV3_2Kleros.ts --once",
+    "indexer:v3_3:shop": "tsx scripts/indexerV3_3ShopEconomy.ts",
+    "indexer:v3_3:shop:once": "tsx scripts/indexerV3_3ShopEconomy.ts --once",
+    "indexer:v3_3:marketplace": "tsx scripts/indexerV3_3ShopEconomy.ts --contract marketplace",
+    "indexer:v3_3:marketplace:once": "tsx scripts/indexerV3_3ShopEconomy.ts --contract marketplace --once",
     "reputation:cron": "tsx scripts/issueAttestationsCron.ts",
     "reputation:cron:once": "tsx scripts/issueAttestationsCron.ts --once",
     "sync-abi": "cd .. && npm run sync-abi"

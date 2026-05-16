@@ -41,6 +41,26 @@ const abiTargets = [
   {
     artifact: "artifacts/contracts/v3_2/KlerosV2DisputeAdapterV3_2.sol/KlerosV2DisputeAdapterV3_2.json",
     output: "frontend/abi/KlerosV2DisputeAdapterV3_2.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3_3/ShopNFT.sol/ShopNFT.json",
+    output: "frontend/abi/ShopNFT.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3_3/ShopShares.sol/ShopShares.json",
+    output: "frontend/abi/ShopShares.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3_3/RevenueDistributor.sol/RevenueDistributor.json",
+    output: "frontend/abi/RevenueDistributor.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3_3/EscrowMarketplaceV3_3.sol/EscrowMarketplaceV3_3.json",
+    output: "frontend/abi/EscrowMarketplaceV3_3.json"
+  },
+  {
+    artifact: "artifacts/contracts/v3_3/ShareMarket.sol/ShareMarket.json",
+    output: "frontend/abi/ShareMarket.json"
   }
 ];
 

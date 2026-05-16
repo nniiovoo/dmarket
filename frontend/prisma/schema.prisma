@@ -526,3 +526,138 @@ model Blacklist {
 
   @@index([createdAt])
 }
+
+// =====================================================================
+// v3.3 shop economy indexer tables (Phase K.5a).
+// All five models are indexer-maintained — see
+// frontend/lib/indexer/v3_3/applyEvent*.ts. Application code reads via
+// /api/shops/* + /api/listings and MUST NOT write directly.
+// =====================================================================
+
+/// One row per shopId, projected from ShopNFT events (ShopCreated /
+/// ShopMetadataUpdated / Transfer). currentOwner advances on every
+/// Transfer.
+model ShopNFT {
+  shopId            Int      @id
+  currentOwner      String
+  creator           String
+  createdAt         DateTime
+  name              String   @default("")
+  description       String   @default("")
+  imageUrl          String   @default("")
+  lastUpdatedBlock  BigInt
+  lastUpdatedTxHash String
+
+  @@index([currentOwner])
+}
+
+/// Current (shopId, holder) balance. Rows with balance=0 are kept so
+/// "addresses that ever held shares of shop N" queries work without a
+/// separate history table.
+model ShopShareHolding {
+  shopId           Int
+  holder           String
+  balance          String
+  lastUpdatedBlock BigInt
+
+  @@id([shopId, holder])
+  @@index([holder])
+  @@index([shopId, balance])
+}
+
+/// Audit log for all three RevenueDistributor event kinds. eventType:
+/// 0 = Deposited, 1 = Settled, 2 = Claimed. `holder` is null for
+/// Deposited; the actor for Settled / Claimed. `token` is
+/// 0x0000…0000 (NATIVE sentinel) for native revenue.
+model ShopRevenueEvent {
+  id          String   @id
+  shopId      Int
+  eventType   Int
+  holder      String?
+  token       String
+  amount      String
+  blockNumber BigInt
+  txHash      String
+  logIndex    Int      @default(0)
+  blockTime   DateTime
+
+  @@unique([txHash, logIndex])
+  @@index([shopId, eventType])
+  @@index([holder])
+  @@index([blockNumber])
+}
+
+/// Projection of ShareMarket events. Status: 0 Active / 1 Filled / 2
+/// Cancelled. buyer is populated on fill; closed{Block,TxHash} are set
+/// on Filled / Cancelled.
+model ShopListing {
+  listingId     Int     @id
+  seller        String
+  shopId        Int
+  amount        String
+  paymentToken  String
+  totalPrice    String
+  status        Int
+  buyer         String?
+  createdBlock  BigInt
+  createdTxHash String
+  closedBlock   BigInt?
+  closedTxHash  String?
+
+  @@index([seller])
+  @@index([shopId, status])
+  @@index([status])
+}
+
+/// Per-(chainId, contractAddress) catch-up cursor for the four
+/// shop-economy contracts. contractType is one of
+/// "shopNft" / "shopShares" / "distributor" / "shareMarket" so a
+/// single tail query can list all four cursors at a glance.
+model IndexerStateV3_3ShopEconomy {
+  chainId          Int
+  contractAddress  String
+  contractType     String
+  lastIndexedBlock BigInt
+  updatedAt        DateTime @updatedAt
+
+  @@id([chainId, contractAddress])
+  @@index([contractType])
+}
+
+/// v3.3 order projection (Phase K.5b). Schema mirrors OnChainOrderV3_2
+/// plus `shopId` (snapshotted at create time, immutable per the v3.3
+/// "investor invariant") and the fee / sellerAmount split written by
+/// RevenueDistributed events on order completion.
+///
+/// Cursor lives in IndexerStateV3_3ShopEconomy with contractType
+/// = 'marketplace'. Application code reads via /api/orders/v3_3/...
+/// and MUST NOT write directly.
+model OnChainOrderV3_3 {
+  chainId            Int
+  marketplaceAddress String
+  onChainOrderId     String
+  buyer              String
+  seller             String
+  shopId             Int
+  paymentToken       String
+  productId          String
+  amount             String
+  status             Int
+  createdAt          DateTime
+  paidAt             DateTime?
+  shippedAt          DateTime?
+  completedAt        DateTime?
+  disputedAt         DateTime?
+  feeAmount          String?
+  sellerAmount       String?
+  lastEventBlock     BigInt
+  lastEventTxHash    String
+  lastSyncedAt       DateTime @default(now())
+
+  @@id([chainId, marketplaceAddress, onChainOrderId])
+  @@index([buyer])
+  @@index([seller])
+  @@index([shopId])
+  @@index([status])
+  @@index([chainId, marketplaceAddress])
+}

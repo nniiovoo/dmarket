@@ -20,6 +20,9 @@ import { liveWatch } from "../lib/indexer/liveWatch";
 import { liveWatchV3_1 } from "../lib/indexer/liveWatchV3_1";
 import { liveWatchV3_2 } from "../lib/indexer/liveWatchV3_2";
 import { liveWatchV3_2Kleros } from "../lib/indexer/liveWatchV3_2Kleros";
+import { catchUpShopEconomy } from "../lib/indexer/v3_3/catchUp";
+import { liveWatchShopEconomy } from "../lib/indexer/v3_3/liveWatch";
+import { INDEXED_V3_3_SHOP_ECONOMY_CHAIN_IDS } from "../lib/indexer/v3_3/config";
 
 const once = process.argv.includes("--once");
 
@@ -66,6 +69,22 @@ async function main() {
     }
   }
 
+  // V3.3 shop-economy catch-up — four independent contracts
+  // (ShopNFT / ShopShares / RevenueDistributor / ShareMarket), each
+  // with its own cursor. Failures inside one contract don't stall the
+  // others. The whole pass is wrapped so a chain-level failure can't
+  // affect the v3.2 / Kleros passes above.
+  for (const chainId of INDEXED_V3_3_SHOP_ECONOMY_CHAIN_IDS) {
+    try {
+      await catchUpShopEconomy(chainId);
+    } catch (error) {
+      console.error(
+        `[v3.3 shop-economy chain ${chainId}] initial catch-up failed, will retry on next tick`,
+        error
+      );
+    }
+  }
+
   if (once) {
     await prisma.$disconnect();
     return;
@@ -75,6 +94,9 @@ async function main() {
   const v3_1Stoppers = INDEXED_V3_1_CHAIN_IDS.map((chainId) => liveWatchV3_1(chainId));
   const v3_2Stoppers = INDEXED_V3_2_CHAIN_IDS.map((chainId) => liveWatchV3_2(chainId));
   const v3_2KlerosStoppers = INDEXED_V3_2_KLEROS_CHAIN_IDS.map((chainId) => liveWatchV3_2Kleros(chainId));
+  const v3_3ShopEconomyStoppers = INDEXED_V3_3_SHOP_ECONOMY_CHAIN_IDS.flatMap((chainId) =>
+    liveWatchShopEconomy(chainId)
+  );
   const interval = setInterval(() => {
     void runPeriodicCatchUp();
   }, INDEXER_POLL_INTERVAL_MS);
@@ -85,6 +107,7 @@ async function main() {
     v3_1Stoppers.forEach((stop) => stop());
     v3_2Stoppers.forEach((stop) => stop());
     v3_2KlerosStoppers.forEach((stop) => stop());
+    v3_3ShopEconomyStoppers.forEach((stop) => stop());
     await prisma.$disconnect();
     process.exit(0);
   }
@@ -127,6 +150,14 @@ async function runPeriodicCatchUp() {
       await catchUpV3_2KlerosFromState(chainId);
     } catch (error) {
       console.error(`[v3.2 kleros chain ${chainId}] periodic catch-up failed`, error);
+    }
+  }
+
+  for (const chainId of INDEXED_V3_3_SHOP_ECONOMY_CHAIN_IDS) {
+    try {
+      await catchUpShopEconomy(chainId);
+    } catch (error) {
+      console.error(`[v3.3 shop-economy chain ${chainId}] periodic catch-up failed`, error);
     }
   }
 }

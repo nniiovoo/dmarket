@@ -17,6 +17,8 @@ import { useSiweAuth } from "@/lib/useSiweAuth";
 const navItems = [
   { href: "/", label: "Home" },
   { href: "/products", label: "Products" },
+  { href: "/shops", label: "Shops" },
+  { href: "/portfolio", label: "Portfolio" },
   { href: "/create", label: "Create Order" },
   { href: "/seller", label: "Seller Dashboard" },
   { href: "/messages", label: "Messages" },
