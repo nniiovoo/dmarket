@@ -1,26 +1,31 @@
-# v3.3 — Shop Asset Layer (Phase K)
+# v3.3 — Shop Asset Layer (Phase K + M.1)
 
 **Status:** testnet-only WIP-DRAFT. Mainnet deployment is gated on a full
-audit + legal review of the share-tokenisation design.
+audit + legal review of the token-issuance design.
 
 v3.3 turns each shop on the marketplace into a **transferable, on-chain
-asset** with **fungible revenue shares**. The contract layer is
+asset** with **fungible revenue tokens**. The contract layer is
 separate from v3.2 — v3.2 keeps running, untouched. v3.3 is a parallel
-lane that adds shop identity, share ownership, and a per-order fee
-split into share-pro-rata claims.
+lane that adds shop identity, token ownership, and a per-order fee
+split into pro-rata claims for token holders.
+
+Phase M.1 (v3.5.0) redeployed `ShareMarket` with **per-token pricing
+and partial fills** — see [ShareMarket](#sharemarket-k4--m1) below. The
+on-chain contract names stay `ShopShares` / `ShareMarket` for ABI /
+event compatibility; user-facing UI + docs say "token" / "token holder".
 
 ## Contracts
 
 | Contract | Phase | Address (Arbitrum Sepolia) | Role |
 |---|---|---|---|
 | `ShopNFT` | K.1 | `0xA18A750B1d62dD6EE9a61565634e634654FCda2F` | One ERC-721 per shop. Transferable, but `_update` enforces 1-seller-1-shop. `shopIdOf[address]` is the source of truth elsewhere. |
-| `ShopShares` | K.2 + K.3a | `0x625e45A4E5F6e9065dD4b158c23Cd6e3573B1950` | ERC-1155 with `tokenId == shopId` and `TOTAL_SUPPLY = 10 000` minted once at `initializeShares`. K.3a added a `settler` hook fired on every share movement. |
-| `RevenueDistributor` | K.3a | `0x8d307e4173eD4a9c119b8D762a780Eb0aD59F4cb` | Per-share-index accumulator. `deposit` / `depositERC20` bumps the cumulative index; share transfers pre-credit holders via the `settle` callback; holders pull via `claim` / `claimAll`. |
+| `ShopShares` (token contract) | K.2 + K.3a | `0x625e45A4E5F6e9065dD4b158c23Cd6e3573B1950` | ERC-1155 with `tokenId == shopId` and `TOTAL_SUPPLY = 10 000` minted once at `initializeShares`. K.3a added a `settler` hook fired on every token movement. |
+| `RevenueDistributor` | K.3a | `0x8d307e4173eD4a9c119b8D762a780Eb0aD59F4cb` | Per-token-index accumulator. `deposit` / `depositERC20` bumps the cumulative index; token transfers pre-credit holders via the `settle` callback; holders pull via `claim` / `claimAll`. |
 | `EscrowMarketplaceV3_3` | K.3b | `0x7A99FE6C60281161C57369BbBB1Be197113Cfc4f` | Copy of v3.2 lifecycle + (a) `shopId` snapshot on every order, (b) on-completion split: 99 % seller / 1 % distributor (`feeRateBps` tunable up to 10 %). |
-| `ShareMarket` | K.4 | `0x4BeDd1E3FFf03DFb18aFd5B5dF2daDCBF60b3532` | Approval-based, all-or-nothing listing market for ShopShares. Sellers post `(shopId, amount, paymentToken, totalPrice)`; buyers fill with one tx. Market holds no funds, no shares. |
+| `ShareMarket` (token market) | K.4 → **M.1** | `0x81Ef21C1159d276B53e311D50ecb7F99b9Ec29b6` (M.1) · ~~`0x4BeDd1E3…`~~ (K.4 retired) | Approval-based listing market for shop tokens. **M.1 redesign**: per-token pricing + partial fills. Sellers post `(shopId, amount, paymentToken, pricePerToken)`; buyers fill `1 ≤ amount ≤ remainingAmount` per call. Market holds no funds, no tokens. |
 
 K.3a + K.3b wiring:
-- `shares.setSettler(distributor)` — share transfers trigger `settle`
+- `shares.setSettler(distributor)` — token transfers trigger `settle`
 - `distributor.setAuthorizedDepositor(marketplace, true)` — only the
   marketplace (and the owner) can deposit revenue
 
@@ -59,35 +64,38 @@ K.3a + K.3b wiring:
 1. **1 seller, 1 shop** — `ShopNFT._update` rejects any transfer/mint
    into an address whose `shopIdOf != 0`. Verified end-to-end:
    `transfer to existing-shop owner reverts AlreadyOwnsShop`.
-2. **Fixed share supply** — `ShopShares.TOTAL_SUPPLY = 10 000`, no
+2. **Fixed token supply** — `ShopShares.TOTAL_SUPPLY = 10 000`, no
    mint after `initializeShares`, no burn. Sum of all holders' balances
    for any initialised shopId is exactly 10 000.
 3. **Investor invariant** — `Order.shopId` is snapshotted at
    `createOrder` time. If the seller transfers the ShopNFT before the
    order completes, revenue still routes to the **original** shopId.
-   Shareholders are insulated from operator transfers on in-flight
+   Token holders are insulated from operator transfers on in-flight
    orders.
 4. **No fee on refund** — `cancelOrder` and `resolveDispute(refundBuyer=true)`
    return 100 % of the order amount to the buyer. The distributor is
    never called on these paths.
-5. **Pull-based claims** — no for-each loop over shareholders on
+5. **Pull-based claims** — no for-each loop over token holders on
    deposit. Deposit cost is O(1) in holder count and O(K) in number of
    distinct payment tokens previously deposited to the shop.
 6. **No cross-contract authority leakage** — v3.3 contracts never
    write to v3.2 state. v3.2 state never references v3.3 contracts.
 
-## ShareMarket (K.4)
+## ShareMarket (K.4 → M.1)
 
-ShareMarket is a permissionless, approval-based listing book for
-`ShopShares`. Sellers don't escrow their shares — they keep them in
-their wallet and call `setApprovalForAll(market, true)` once. Each
-listing is fixed-amount / fixed-price / all-or-nothing.
+ShareMarket is a permissionless, approval-based listing book for shop
+tokens. Sellers don't escrow their tokens — they keep them in their
+wallet and call `setApprovalForAll(market, true)` once. As of **M.1
+(v3.5.0)** each listing supports **per-token pricing + partial fills**:
+buyers pick how many tokens to take per call, the listing tracks
+`remainingAmount`, and the status flips to `Filled` only when
+`remainingAmount` reaches 0.
 
 ### Why approval, not escrow
 
-Escrowing shares into the market for the lifetime of a listing would
+Escrowing tokens into the market for the lifetime of a listing would
 hand the market the corresponding revenue-distribution rights — the
-market would receive the `settle` callback on every share movement,
+market would receive the `settle` callback on every token movement,
 and the listing seller would lose accruals while the listing is open.
 Either we'd need to teach the market to forward those accruals back
 to the lister (complex bookkeeping), or sellers would silently lose
@@ -96,49 +104,50 @@ distributor sees the seller as the holder until the fill tx, at which
 point it sees the buyer.
 
 Trade-off: **phantom listings** are possible. A seller can transfer
-shares away or revoke approval after listing. Fills then revert
+tokens away or revoke approval after listing. Fills then revert
 inside `IERC1155.safeTransferFrom` (`ERC1155InsufficientBalance` or
 `ERC1155MissingApprovalForAll`). The buyer is no worse off than if
 the listing had never existed — they pay no gas beyond the failed
-transaction. The K.5 indexer surface will flag listings whose seller
-balance dropped below the listed amount so the frontend can hide
-them.
+transaction. The K.5 indexer surface flags listings whose seller
+balance dropped below the listed amount so the frontend can hide them.
 
-### Lifecycle
+### Lifecycle (M.1, partial-fill)
 
 ```
-seller                                            market state
-──────                                            ────────────
-setApprovalForAll(market, true)            ←──── once per seller
-createListing(shopId, amount, token, price) ───→  Listing.Active
-                                            ←──── ListingCreated event
+seller                                                    market state
+──────                                                    ────────────
+setApprovalForAll(market, true)                  ←──── once per seller
+createListing(shopId, amount, token, pricePerToken) ───→  Listing.Active
+                                                  ←──── ListingCreated event
+                                                        remainingAmount = amount
 
-buyer
+buyer (one or many; any positive amount ≤ remaining)
 ─────
-fillListing(id, msg.value=price for native)
-   pre-flight: status == Active                 (CEI: state flips first)
+fillListing(id, amount, msg.value=pricePerToken*amount)
+   pre-flight: status == Active && amount ≤ remaining   (CEI: state flips first)
    pay seller (native call OR safeTransferFrom)
-   transfer shares via shopShares.safeTransferFrom
-                                            ←──── ListingFilled event
-                                                  Listing.Filled
+   transfer `amount` tokens via shopShares.safeTransferFrom
+                                                  ←──── ListingFilled event
+                                                        remainingAmount -= amount
+                                                        status flips to Filled iff remaining==0
 
 seller
 ──────
-cancelListing(id) — always allowed, even when paused
-                                            ←──── ListingCancelled event
-                                                  Listing.Cancelled
+cancelListing(id) — always allowed (even mid-fill, even when paused).
+                                                  ←──── ListingCancelled event
+                                                        Listing.Cancelled
+                                                        any remainingAmount stays in seller's wallet
 ```
 
 ### Out of scope (deferred)
 
-- **Partial fills.** Multi-tier sellers post multiple listings. K.4b.
 - **Platform fee.** Payments go straight from buyer to seller.
   Adding a fee is a one-branch change in `fillListing` plus a setter.
 - **paymentToken allowlist.** Buyers vet the listing's paymentToken
   themselves — same risk model as vetting the seller / price.
 - **Reservation / locking.** A listing is racy in the sense that two
-  buyers can both try to fill it; the first tx wins, the second sees
-  `ListingNotActive(Filled)`.
+  buyers can both try to fill the same remainder; the first tx wins,
+  the second sees `FillAmountExceedsRemaining` or `ListingNotActive`.
 
 ## v3.2 vs v3.3
 
@@ -167,7 +176,7 @@ timeout + 7-day emergency timelock) lives in
 **v3.3-specific note**: a "favor seller" ruling (refundBuyer=false)
 routes through `marketplace.resolveDispute → _completeOrder`, which
 already pays the platform fee into the `RevenueDistributor`
-(shareholders earn from disputed-then-resolved orders too). The
+(token holders earn from disputed-then-resolved orders too). The
 adapter is purely routing — it does not duplicate any
 revenue-distribution logic.
 
@@ -183,14 +192,19 @@ The indexer (Phase L.3) mirrors `DisputeEscalated` /
   detail page is read-only (no Mark Shipped / Confirm Received buttons
   yet). Disputed orders show the Kleros escalation UI; everything else
   is informational.
-- **Mainnet.** Audit + share-tokenisation legal review must come first.
+- **Mainnet.** Audit + token-issuance legal review must come first.
   Every contract still carries the `WIP-DRAFT — NOT AUDITED — DO NOT
   DEPLOY TO MAINNET` header in its NatSpec.
 
 ## Roadmap pointers
 
-- **K.4** — ✅ shipped. ShareMarket address above.
-- **K.5** — v3.3 indexer (OnChainOrderV3_3, ShopNFT events, Shares
-  events, Distributor events, ShareMarket listings) + metadata server.
-- **K.6** — Frontend: `/shop/{id}` page, share-market UI, shareholder
-  dashboard (cumulative earnings, pending claims, claim button).
+- **K.4** — ✅ shipped (all-or-nothing). Retired by M.1.
+- **K.5** — ✅ shipped. v3.3 indexer (OnChainOrderV3_3, ShopNFT
+  events, ShopShares events, Distributor events, ShareMarket listings)
+  + metadata server.
+- **K.6** — ✅ shipped. Frontend: `/shop/{id}` page, token-market UI,
+  token-holder dashboard (cumulative earnings, pending claims, claim
+  button).
+- **L** — ✅ shipped (v3.4.0 / v3.4.1). Kleros adapter + indexer + UI.
+- **M.1** — ✅ shipped (v3.5.0). Token-market partial fills, UI/docs
+  rename `share → token`. New `ShareMarket` address above.

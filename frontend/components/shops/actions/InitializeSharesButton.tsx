@@ -22,15 +22,15 @@ export function InitializeSharesButton({ shopId, onConfirmed }: Props) {
     );
   }
   return (
-    <Card title="Initialise shares">
+    <Card title="Initialise tokens">
       <p className="mb-3 text-sm text-slate-600">
-        Mint the fixed 10 000-share supply for this shop. All shares go to your wallet on
-        confirmation; sell them via the Sell-shares form, gift them off-chain — your call.
+        Mint the fixed 10 000-token supply for this shop. All tokens go to your wallet on
+        confirmation; sell them via the Sell-tokens form, gift them off-chain — your call.
         This action is one-time per shop.
       </p>
       <TxPanel
-        label="Initialise shares"
-        description="Mints 10 000 shares of this shopId to your wallet. One-time."
+        label="Initialise tokens"
+        description="Mints 10 000 tokens of this shopId to your wallet. One-time."
         onConfirmed={onConfirmed}
         buildTransaction={() => ({
           address,

@@ -22,6 +22,9 @@ type Status = "idle" | "checking-approval" | "approving" | "listing" | "success"
 
 interface Props {
   shopId: number;
+  /// Token-holder balance for this shopId. Kept as `shareBalance` for
+  /// caller-compat with the existing v3.3 role hook; UI labels say
+  /// "tokens" everywhere user-visible.
   shareBalance: bigint | undefined;
   onConfirmed?: () => void;
 }
@@ -32,13 +35,14 @@ interface TokenChoice {
   decimals: number;
 }
 
-/// Two-step sell-shares flow:
+/// Two-step sell-tokens flow:
 ///   1. If isApprovedForAll(shares, market) === false → setApprovalForAll
 ///      (one-time gesture per seller; subsequent listings skip this).
-///   2. createListing(shopId, amount, paymentToken, totalPrice).
+///   2. createListing(shopId, amount, paymentToken, pricePerToken)
+///      — listing supports partial fills (Phase M.1).
 ///
 /// Mounted on /shops/[id] only when the connected wallet holds ≥ 1
-/// share of the shop. The component embeds its own status pill so the
+/// token of the shop. The component embeds its own status pill so the
 /// approve → list flow can sequence its tx hashes; TxPanel doesn't
 /// model multi-step writes.
 export function CreateListingForm({ shopId, shareBalance, onConfirmed }: Props) {
@@ -164,7 +168,7 @@ export function CreateListingForm({ shopId, shareBalance, onConfirmed }: Props) 
         onClick={() => setExpanded((v) => !v)}
         className="text-sm font-medium text-blue-600 hover:underline"
       >
-        {expanded ? "▾" : "▸"} Sell shares
+        {expanded ? "▾" : "▸"} Sell tokens
       </button>
       {expanded ? (
         <div className="mt-4 space-y-3">
@@ -181,7 +185,7 @@ export function CreateListingForm({ shopId, shareBalance, onConfirmed }: Props) 
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm tabular-nums"
               />
               <p className="mt-1 text-xs text-slate-500">
-                You hold {shareBalance === undefined ? "…" : shareBalance.toString()} shares of shop #{shopId}.
+                You hold {shareBalance === undefined ? "…" : shareBalance.toString()} tokens of shop #{shopId}.
               </p>
             </div>
             <div>
@@ -203,17 +207,45 @@ export function CreateListingForm({ shopId, shareBalance, onConfirmed }: Props) 
             </div>
             <div className="sm:col-span-2">
               <label className="block text-xs font-medium uppercase tracking-wide text-slate-600">
-                Total price ({symbol})
+                Price per token ({symbol})
               </label>
               <input
                 type="text"
                 value={priceInput}
                 onChange={(e) => setPriceInput(e.target.value)}
-                placeholder="e.g. 0.001"
+                placeholder="e.g. 0.0001"
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm tabular-nums"
               />
               <p className="mt-1 text-xs text-slate-500">
-                Total price for the whole batch — buyers fill the listing all-or-nothing.
+                Unit price. Buyers can fill any number of tokens up to the remaining amount.
+                {amountBig !== undefined && priceBig !== undefined ? (
+                  <>
+                    {" "}
+                    Full listing would clear at{" "}
+                    <span className="font-mono">{priceInput}</span> × {amountBig.toString()} ={" "}
+                    {(() => {
+                      // Show the implied total in human units for sanity.
+                      try {
+                        const total = priceBig * amountBig;
+                        const denom = 10n ** BigInt(decimals);
+                        const whole = total / denom;
+                        const frac = total % denom;
+                        const fracStr = frac
+                          .toString()
+                          .padStart(decimals, "0")
+                          .replace(/0+$/, "");
+                        return (
+                          <span className="font-mono">
+                            {whole.toString()}
+                            {fracStr ? `.${fracStr}` : ""} {symbol}
+                          </span>
+                        );
+                      } catch {
+                        return null;
+                      }
+                    })()}
+                  </>
+                ) : null}
               </p>
             </div>
           </div>
@@ -227,7 +259,7 @@ export function CreateListingForm({ shopId, shareBalance, onConfirmed }: Props) 
 
           {amountBig !== undefined && shareBalance !== undefined && amountBig > shareBalance ? (
             <p className="text-xs text-red-600">
-              Amount exceeds your balance ({shareBalance.toString()} shares).
+              Amount exceeds your balance ({shareBalance.toString()} tokens).
             </p>
           ) : null}
 

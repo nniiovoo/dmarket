@@ -122,7 +122,7 @@ export default function PortfolioPage() {
             )}
           </Card>
 
-          <Card title={`Share holdings (${holdings.length})`}>
+          <Card title={`Token holdings (${holdings.length})`}>
             {loading && holdings.length === 0 ? (
               <SkeletonLine />
             ) : error ? (
@@ -130,7 +130,7 @@ export default function PortfolioPage() {
             ) : holdings.length === 0 ? (
               <EmptyState
                 title="No holdings"
-                body="You don't own any ShopShares yet. Browse /shops and look for shops with active listings."
+                body="You don't own any shop tokens yet. Browse /shops and look for shops with active listings."
               />
             ) : (
               <ul className="space-y-2">
@@ -205,10 +205,11 @@ function UserListingRow({ listing }: { listing: ShopListing }) {
             Listing #{listing.listingId} · shop #{listing.shopId}
           </Link>
           <p className="text-xs text-slate-600">
-            <span className="font-mono">{listing.amount}</span> shares for{" "}
+            <span className="font-mono">{listing.remainingAmount ?? listing.amount}</span> / {listing.originalAmount ?? listing.amount} tokens @{" "}
             <span className="font-mono">
-              {formatPrice(listing.totalPrice, listing.paymentToken)}
-            </span>
+              {formatPrice(listing.pricePerToken ?? listing.totalPrice, listing.paymentToken)}
+            </span>{" "}
+            per token
           </p>
         </div>
         <span

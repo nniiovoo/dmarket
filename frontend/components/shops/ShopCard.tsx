@@ -49,12 +49,12 @@ export function ShopCard({ shop }: Props) {
         </p>
         {shop.sharesInitialized ? (
           <p className="text-xs text-slate-600">
-            <span className="font-medium text-slate-900">{shop.totalShareholders}</span> shareholder
-            {shop.totalShareholders === 1 ? "" : "s"} · <span className="font-medium text-slate-900">{shop.totalSharesIssued}</span> shares
+            <span className="font-medium text-slate-900">{shop.totalShareholders}</span> token holder
+            {shop.totalShareholders === 1 ? "" : "s"} · <span className="font-medium text-slate-900">{shop.totalSharesIssued}</span> tokens
           </p>
         ) : (
           <span className="inline-flex items-center rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-            Shares not yet initialized
+            Tokens not yet initialized
           </span>
         )}
       </div>

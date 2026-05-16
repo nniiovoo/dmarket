@@ -26,8 +26,8 @@ export function HoldingsTable({ holdings, totalSharesIssued, sharesInitialized }
   if (!sharesInitialized) {
     return (
       <EmptyState
-        title="Shares not yet initialised"
-        body="The shop owner has not minted the share supply yet. Once they call initializeShares, 10 000 shares will appear here."
+        title="Tokens not yet initialised"
+        body="The shop owner has not minted the token supply yet. Once they call initializeShares, 10 000 tokens will appear here."
       />
     );
   }
@@ -50,7 +50,7 @@ export function HoldingsTable({ holdings, totalSharesIssued, sharesInitialized }
           <tr>
             <th className="pb-2 font-medium">Holder</th>
             <th className="pb-2 text-right font-medium">Balance</th>
-            <th className="pb-2 text-right font-medium">Share %</th>
+            <th className="pb-2 text-right font-medium">Holding %</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -92,7 +92,7 @@ export function HoldingsTable({ holdings, totalSharesIssued, sharesInitialized }
         </button>
       ) : null}
       <p className="mt-3 text-xs text-slate-500">
-        Total issued: <span className="font-mono">{totalSharesIssued}</span> shares
+        Total issued: <span className="font-mono">{totalSharesIssued}</span> tokens
       </p>
     </>
   );

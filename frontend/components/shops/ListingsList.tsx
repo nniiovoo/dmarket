@@ -25,16 +25,15 @@ function tokenByAddress(token: string): AcceptedToken | undefined {
   return accepted.find((t) => t.address.toLowerCase() === token.toLowerCase());
 }
 
-function formatPrice(totalPrice: string, paymentToken: string): string {
-  const amount = BigInt(totalPrice);
+function formatAmountInToken(raw: bigint, paymentToken: string): string {
   if (paymentToken.toLowerCase() === NATIVE) {
-    return `${formatEther(amount)} ETH`;
+    return `${formatEther(raw)} ETH`;
   }
   const meta = tokenByAddress(paymentToken);
   if (meta) {
-    return `${formatUnits(amount, meta.decimals)} ${meta.symbol}`;
+    return `${formatUnits(raw, meta.decimals)} ${meta.symbol}`;
   }
-  return `${amount.toString()} (raw, token ${shortAddress(paymentToken)})`;
+  return `${raw.toString()} (raw, token ${shortAddress(paymentToken)})`;
 }
 
 interface Props {
@@ -57,7 +56,7 @@ export function ListingsList({ listings, onChange }: Props) {
         {active.length === 0 ? (
           <EmptyState
             title="No active listings"
-            body="When a shareholder posts shares for sale, the listing shows up here. Use the Sell-shares form below if you hold shares of this shop."
+            body="When a token holder posts tokens for sale, the listing shows up here. Use the Sell-tokens form below if you hold tokens of this shop."
           />
         ) : (
           <ul className="space-y-2">
@@ -97,7 +96,21 @@ function ListingRow({ listing, onChange }: { listing: ShopListing; onChange?: ()
       : listing.status === "Filled"
       ? "bg-blue-100 text-blue-900"
       : "bg-slate-100 text-slate-600";
-  const price = formatPrice(listing.totalPrice, listing.paymentToken);
+
+  // M.1: prefer per-token pricing + remaining-of-original. Legacy K.4
+  // listings (no pricePerToken column) fall back to the old labels.
+  const originalAmount = listing.originalAmount ?? listing.amount;
+  const remainingAmount = listing.remainingAmount ?? listing.amount;
+  const pricePerTokenBig = listing.pricePerToken
+    ? BigInt(listing.pricePerToken)
+    : (() => {
+        try {
+          return BigInt(listing.totalPrice) / BigInt(originalAmount);
+        } catch {
+          return 0n;
+        }
+      })();
+  const pricePerTokenLabel = formatAmountInToken(pricePerTokenBig, listing.paymentToken);
 
   return (
     <li className="rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -105,8 +118,10 @@ function ListingRow({ listing, onChange }: { listing: ShopListing; onChange?: ()
         <div className="space-y-0.5 text-sm">
           <div className="font-medium text-slate-900">
             Listing #{listing.listingId} ·{" "}
-            <span className="font-mono">{listing.amount}</span> shares for{" "}
-            <span className="font-mono">{price}</span>
+            <span className="font-mono">{remainingAmount}</span>
+            {" / "}
+            <span className="font-mono">{originalAmount}</span> tokens left @{" "}
+            <span className="font-mono">{pricePerTokenLabel}</span> per token
           </div>
           <div className="text-xs text-slate-600">
             Seller{" "}

@@ -66,8 +66,8 @@ export default function ShopsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-950">ChainUs Shops</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Every shop on the marketplace is a transferable NFT with a fixed 10 000-share supply.
-            Browse below; pick one to see its shareholders and any active listings.
+            Every shop on the marketplace is a transferable NFT with a fixed 10 000-token supply.
+            Browse below; pick one to see its token holders and any active listings.
           </p>
         </div>
       </header>

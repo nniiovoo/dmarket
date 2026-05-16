@@ -38,6 +38,12 @@ export interface ShopListing {
   amount: string;
   paymentToken: string;
   totalPrice: string;
+  // M.1 partial-fill fields. Nullable so legacy K.4 rows still
+  // deserialize. New listings always populate all three; UI can fall
+  // back to (amount, totalPrice) when these are null.
+  originalAmount: string | null;
+  remainingAmount: string | null;
+  pricePerToken: string | null;
   status: ShopListingStatus;
   statusCode: number;
   buyer: string | null;

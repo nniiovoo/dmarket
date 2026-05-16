@@ -79,13 +79,13 @@ export function ShopHeader({ shop }: Props) {
           )}
           {shop.sharesInitialized ? (
             <p className="text-sm text-slate-700">
-              <span className="font-semibold">{shop.totalShareholders}</span> shareholder
+              <span className="font-semibold">{shop.totalShareholders}</span> token holder
               {shop.totalShareholders === 1 ? "" : "s"} ·{" "}
-              <span className="font-semibold">{shop.totalSharesIssued}</span> shares issued
+              <span className="font-semibold">{shop.totalSharesIssued}</span> tokens issued
             </p>
           ) : (
             <span className="inline-flex items-center rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900">
-              Shares not yet initialised — the owner can mint the 10 000 supply at any time
+              Tokens not yet initialised — the owner can mint the 10 000 supply at any time
             </span>
           )}
         </div>

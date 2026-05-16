@@ -114,7 +114,7 @@ export default function ShopDetailPage() {
         <div className="space-y-6">
           <ShopHeader shop={shop} />
 
-          <Card title={`Shareholders (${holdings.length})`}>
+          <Card title={`Token holders (${holdings.length})`}>
             <HoldingsTable
               holdings={holdings}
               totalSharesIssued={shop.totalSharesIssued}

@@ -257,6 +257,11 @@ export function decodeDistributorLog(
 // ShareMarket
 // ---------------------------------------------------------------------------
 
+// M.1 introduces partial fills. `ListingCreated` now reports
+// `pricePerToken` (was `totalPrice`), and `ListingFilled` carries the
+// per-fill `amount`, the `totalCost` paid, and `remainingAfter` —
+// enough state for the applier to reconstruct partial-fill progress
+// without re-reading on-chain.
 export type ShareMarketEvent =
   | (LogContext & {
       kind: "ListingCreated";
@@ -265,7 +270,7 @@ export type ShareMarketEvent =
       shopId: bigint;
       amount: bigint;
       paymentToken: Address;
-      totalPrice: bigint;
+      pricePerToken: bigint;
     })
   | (LogContext & {
       kind: "ListingFilled";
@@ -275,7 +280,8 @@ export type ShareMarketEvent =
       shopId: bigint;
       amount: bigint;
       paymentToken: Address;
-      totalPrice: bigint;
+      totalCost: bigint;
+      remainingAfter: bigint;
     })
   | (LogContext & { kind: "ListingCancelled"; listingId: bigint; seller: Address });
 
@@ -304,7 +310,7 @@ export function decodeShareMarketLog(
         shopId: decoded.args.shopId as bigint,
         amount: decoded.args.amount as bigint,
         paymentToken: decoded.args.paymentToken as Address,
-        totalPrice: decoded.args.totalPrice as bigint
+        pricePerToken: decoded.args.pricePerToken as bigint
       };
     case "ListingFilled":
       return {
@@ -316,7 +322,8 @@ export function decodeShareMarketLog(
         shopId: decoded.args.shopId as bigint,
         amount: decoded.args.amount as bigint,
         paymentToken: decoded.args.paymentToken as Address,
-        totalPrice: decoded.args.totalPrice as bigint
+        totalCost: decoded.args.totalCost as bigint,
+        remainingAfter: decoded.args.remainingAfter as bigint
       };
     case "ListingCancelled":
       return {

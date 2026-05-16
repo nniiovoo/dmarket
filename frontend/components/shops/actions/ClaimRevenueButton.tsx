@@ -28,7 +28,7 @@ interface ClaimableRow {
   pending: bigint;
 }
 
-/// Shareholder-only panel that reads pendingClaim(shopId, token,
+/// Token-holder-only panel that reads pendingClaim(shopId, token,
 /// holder) for the native asset + every accepted ERC-20, then renders
 /// a per-token claim button. Empty pending values are hidden so the
 /// card doesn't show four "0 ETH" rows.
@@ -121,7 +121,7 @@ export function ClaimRevenueButton({ shopId, onConfirmed }: Props) {
         <p className="text-sm text-slate-600">
           Nothing claimable for this shop right now. Revenue accrues when buyers complete orders
           on the v3.3 marketplace (1 % of every completed order is split pro-rata across
-          shareholders).
+          token holders).
         </p>
       ) : (
         <ul className="space-y-2">

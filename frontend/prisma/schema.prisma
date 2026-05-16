@@ -591,18 +591,26 @@ model ShopRevenueEvent {
 /// Cancelled. buyer is populated on fill; closed{Block,TxHash} are set
 /// on Filled / Cancelled.
 model ShopListing {
-  listingId     Int     @id
-  seller        String
-  shopId        Int
-  amount        String
-  paymentToken  String
-  totalPrice    String
-  status        Int
-  buyer         String?
-  createdBlock  BigInt
-  createdTxHash String
-  closedBlock   BigInt?
-  closedTxHash  String?
+  listingId       Int     @id
+  seller          String
+  shopId          Int
+  // Legacy K.4 fields. For M.1 listings, `amount` mirrors
+  // `originalAmount` and `totalPrice` mirrors
+  // `pricePerToken * originalAmount` so older callers still work.
+  amount          String
+  paymentToken    String
+  totalPrice      String
+  // M.1 partial-fill fields. Nullable so K.4 rows survive the
+  // migration; new rows always populate all three.
+  originalAmount  String?
+  remainingAmount String?
+  pricePerToken   String?
+  status          Int
+  buyer           String?
+  createdBlock    BigInt
+  createdTxHash   String
+  closedBlock     BigInt?
+  closedTxHash    String?
 
   @@index([seller])
   @@index([shopId, status])

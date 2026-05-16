@@ -323,15 +323,24 @@ async function applyShareMarketEvent(
 ): Promise<void> {
   if (ev.kind === "ListingCreated") {
     const listingId = Number(ev.listingId);
+    // M.1: persist (originalAmount, remainingAmount, pricePerToken).
+    // Also fill the legacy `amount` + `totalPrice` columns so any
+    // un-migrated query still resolves to sensible numbers.
+    const originalAmount = ev.amount.toString();
+    const pricePerToken = ev.pricePerToken.toString();
+    const totalAtMint = (ev.amount * ev.pricePerToken).toString();
     await prisma.shopListing.upsert({
       where: { listingId },
       create: {
         listingId,
         seller: lower(ev.seller),
         shopId: Number(ev.shopId),
-        amount: ev.amount.toString(),
+        amount: originalAmount,
         paymentToken: lower(ev.paymentToken),
-        totalPrice: ev.totalPrice.toString(),
+        totalPrice: totalAtMint,
+        originalAmount,
+        remainingAmount: originalAmount,
+        pricePerToken,
         status: LISTING_STATUS_ACTIVE,
         buyer: null,
         createdBlock: ev.blockNumber,
@@ -343,9 +352,12 @@ async function applyShareMarketEvent(
         // re-org rebuild
         seller: lower(ev.seller),
         shopId: Number(ev.shopId),
-        amount: ev.amount.toString(),
+        amount: originalAmount,
         paymentToken: lower(ev.paymentToken),
-        totalPrice: ev.totalPrice.toString(),
+        totalPrice: totalAtMint,
+        originalAmount,
+        remainingAmount: originalAmount,
+        pricePerToken,
         status: LISTING_STATUS_ACTIVE,
         buyer: null,
         createdBlock: ev.blockNumber,
@@ -357,14 +369,27 @@ async function applyShareMarketEvent(
     return;
   }
   if (ev.kind === "ListingFilled") {
+    // M.1: a fill no longer terminates the listing unconditionally —
+    // it shrinks `remainingAmount`. The on-chain `remainingAfter`
+    // field is authoritative; if it's 0 the listing flips to Filled
+    // in the same call. Record the buyer of the *terminal* fill so
+    // the legacy `buyer` column still reflects "who closed it" —
+    // for partial fills, we leave `buyer` until the final fill.
+    const remainingAfter = ev.remainingAfter.toString();
+    const flippedToFilled = ev.remainingAfter === 0n;
     await prisma.shopListing
       .update({
         where: { listingId: Number(ev.listingId) },
         data: {
-          status: LISTING_STATUS_FILLED,
-          buyer: lower(ev.buyer),
-          closedBlock: ev.blockNumber,
-          closedTxHash: ev.txHash
+          remainingAmount: remainingAfter,
+          status: flippedToFilled ? LISTING_STATUS_FILLED : LISTING_STATUS_ACTIVE,
+          ...(flippedToFilled
+            ? {
+                buyer: lower(ev.buyer),
+                closedBlock: ev.blockNumber,
+                closedTxHash: ev.txHash
+              }
+            : {})
         }
       })
       .catch((err: unknown) => {

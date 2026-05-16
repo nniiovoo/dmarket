@@ -52,7 +52,7 @@ export default function MintShopPage() {
       <h1 className="text-2xl font-semibold text-slate-950">Create your shop</h1>
       <p className="mt-2 text-sm text-slate-600">
         Minting a ShopNFT gives your wallet a transferable shop identity. Each ShopNFT enforces a
-        1-seller-1-shop invariant — you can hold at most one shop at a time. The 10 000 share
+        1-seller-1-shop invariant — you can hold at most one shop at a time. The 10 000 token
         supply is minted separately after this step.
       </p>
 

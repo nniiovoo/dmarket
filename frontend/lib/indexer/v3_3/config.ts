@@ -160,7 +160,8 @@ function readPositiveBigIntEnv(name: string, fallback: bigint): bigint {
 //   ShopShares (K.3a):     0xb46dec32… in block 268_775_538
 //   Distributor (K.3a):    0xf1f0d2ed… in block 268_775_609
 //   Marketplace (K.3b):    0x00479cc7… in block 268_777_562
-//   ShareMarket (K.4):     0xd9cd0fbc… in block 268_780_661
+//   ShareMarket (K.4):     0xd9cd0fbc… in block 268_780_661 (RETIRED, all-or-nothing)
+//   ShareMarket (M.1):     0xc6ea6586… in block 268_804_208 (current, partial-fill)
 //   KlerosAdapter (L.1):   0xbdd54667… in block 268_796_181
 // Defaults are one block earlier so the deploy log itself is in range.
 
@@ -177,7 +178,7 @@ export function getDeploymentBlock(
     case "distributor":
       return readPositiveBigIntEnv("INDEXER_V3_3_DISTRIBUTOR_FROM_BLOCK", 268_775_608n);
     case "shareMarket":
-      return readPositiveBigIntEnv("INDEXER_V3_3_SHARE_MARKET_FROM_BLOCK", 268_780_660n);
+      return readPositiveBigIntEnv("INDEXER_V3_3_SHARE_MARKET_FROM_BLOCK", 268_804_207n);
     case "marketplace":
       return readPositiveBigIntEnv("INDEXER_V3_3_MARKETPLACE_FROM_BLOCK", 268_777_561n);
     case "klerosAdapter":
