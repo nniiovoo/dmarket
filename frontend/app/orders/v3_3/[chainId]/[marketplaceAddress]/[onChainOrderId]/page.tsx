@@ -3,11 +3,14 @@
 import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { formatEther, formatUnits } from "viem";
+import { formatEther, formatUnits, type Address } from "viem";
 
 import { Card, EmptyState, SkeletonLine } from "@/components/Card";
+import { V3_3KlerosSection } from "@/components/orders/V3_3KlerosSection";
 import { PRIMARY_CHAIN_ID } from "@/lib/chains";
 import { getAcceptedTokens } from "@/lib/contractsV3_2";
+import { getV3_3KlerosAdapterAddress } from "@/lib/contractsV3_3";
+import { useOrderRole } from "@/lib/v3_2/useOrderRole";
 
 const NATIVE = "0x0000000000000000000000000000000000000000";
 const ARBISCAN_TX_BASE = "https://sepolia.arbiscan.io/tx";
@@ -77,6 +80,17 @@ export default function V3_3OrderPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
   const [missing, setMissing] = useState(false);
+
+  // Hook must be called unconditionally. Pass zero-address fallbacks when
+  // the order hasn't loaded yet; the hook returns 'observer' in that case,
+  // which is fine because the Kleros section only renders for Disputed
+  // orders below (and Disputed implies `order` is non-null here).
+  const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as Address;
+  const { role } = useOrderRole({
+    buyer: (order?.buyer ?? ZERO_ADDR) as Address,
+    seller: (order?.seller ?? ZERO_ADDR) as Address
+  });
+  const klerosAdapterAddress = getV3_3KlerosAdapterAddress(chainId);
 
   useEffect(() => {
     if (invalid) return;
@@ -190,6 +204,15 @@ export default function V3_3OrderPage() {
               </Field>
             </div>
           </Card>
+
+          {order.status === "Disputed" && klerosAdapterAddress ? (
+            <V3_3KlerosSection
+              order={{ onChainOrderId: order.onChainOrderId }}
+              chainId={chainId}
+              adapterAddress={klerosAdapterAddress}
+              role={role}
+            />
+          ) : null}
 
           <Card title="Timeline">
             <ul className="space-y-1 text-sm">
